@@ -47,7 +47,7 @@ async function createStartedTournament(playerCount = 8) {
   for (let index = 0; index < playerCount; index += 1) {
     const player = await createUser(UserRole.PLAYER);
     players.push(player);
-    await joinTournament(player.id, tournament.id, { areaXp: 2200 + index });
+    await joinTournament(player.id, tournament.id, { areaXp: 2200 + index, participantName: `Player ${index}` });
   }
   if (playerCount > 0) {
     await startTournament(admin.id, tournament.id);

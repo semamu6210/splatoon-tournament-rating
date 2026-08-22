@@ -10,7 +10,7 @@ import {
 } from "@/lib/rating-config";
 import { prisma } from "@/lib/prisma";
 import { normalizeStageNames, normalizeStagePoolEnabled, syncTournamentStagePool } from "@/lib/stage-service";
-import { areaXpValue, optionalDate, requiredString } from "@/lib/validation";
+import { areaXpValue, optionalDate, participantNameValue, requiredString } from "@/lib/validation";
 
 export type TournamentInput = {
   name: unknown;
@@ -324,13 +324,13 @@ export async function createRatingConfigVersion(
   });
 }
 
-export async function joinTournament(userId: string, tournamentId: string, input: { areaXp: unknown }) {
+export async function joinTournament(userId: string, tournamentId: string, input: { areaXp: unknown; participantName: unknown }) {
   const areaXp = areaXpValue(input.areaXp);
+  const participantName = participantNameValue(input.participantName);
 
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: userId } });
     if (!user) throw new ApiError(404, "User not found.");
-    const participantName = user.discordUsername ?? user.name ?? user.id;
     const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
 
     if (!tournament) {
@@ -373,6 +373,28 @@ export async function joinTournament(userId: string, tournamentId: string, input
         rating: null,
         ratingInitializedAt: null,
       },
+    });
+  });
+}
+
+export async function updateParticipantName(user: AuthenticatedUser, tournamentId: string, input: { participantName: unknown }) {
+  const participantName = participantNameValue(input.participantName);
+
+  return prisma.$transaction(async (tx) => {
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
+    if (!tournament) throw new ApiError(404, "Tournament not found.");
+
+    const participant = await tx.tournamentParticipant.findUnique({
+      where: { tournamentId_userId: { tournamentId, userId: user.id } },
+    });
+    if (!participant || !participant.isActive) throw new ApiError(404, "Active participation not found.");
+    if (tournament.status !== TournamentStatus.REGISTRATION) {
+      throw new ApiError(400, "participantName can be changed only during REGISTRATION.");
+    }
+
+    return tx.tournamentParticipant.update({
+      where: { id: participant.id },
+      data: { participantName },
     });
   });
 }

@@ -73,8 +73,8 @@ describe("test dummies", () => {
 
     const realA = await createUser(UserRole.PLAYER);
     const realB = await createUser(UserRole.PLAYER);
-    await joinTournament(realA.id, tournament.id, { areaXp: 2500 });
-    await joinTournament(realB.id, tournament.id, { areaXp: 2550 });
+    await joinTournament(realA.id, tournament.id, { areaXp: 2500, participantName: "Real A" });
+    await joinTournament(realB.id, tournament.id, { areaXp: 2550, participantName: "Real B" });
 
     const dummies = await addTestDummies(admin.id, admin.role, tournament.id, { count: 6, areaXp: 2500 });
     createdUserIds.push(...dummies.map((dummy) => dummy.userId));
@@ -161,7 +161,7 @@ describe("test dummies", () => {
     await openRegistration(admin.id, tournament.id);
 
     const real = await createUser(UserRole.PLAYER);
-    await joinTournament(real.id, tournament.id, { areaXp: 2500 });
+    await joinTournament(real.id, tournament.id, { areaXp: 2500, participantName: "Real Player" });
     const dummies = await addTestDummies(admin.id, admin.role, tournament.id, { count: 7, areaXp: 2500 });
     createdUserIds.push(...dummies.map((dummy) => dummy.userId));
     await startTournament(admin.id, tournament.id);
@@ -217,7 +217,10 @@ describe("test dummies", () => {
     const automated = await fullyAutomateTestMatch(admin.id, admin.role, matchmaking.matchId);
     expect(automated.status).toBe("CONFIRMED");
     expect(automated.winnerTeam === "A" || automated.winnerTeam === "B").toBe(true);
-    expect(await prisma.playerVote.count({ where: { matchId: matchmaking.matchId } })).toBe(16);
+    const votes = await prisma.playerVote.findMany({ where: { matchId: matchmaking.matchId } });
+    expect(votes).toHaveLength(16);
+    expect(new Set(votes.map((vote) => vote.voterUserId))).toHaveLength(8);
+    expect(await prisma.ratingHistory.count({ where: { matchId: matchmaking.matchId } })).toBe(8);
     expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING" } })).toBe(0);
   });
 
@@ -228,7 +231,7 @@ describe("test dummies", () => {
     for (let index = 0; index < 8; index += 1) {
       const user = await createUser(UserRole.PLAYER);
       users.push(user);
-      await joinTournament(user.id, tournament.id, { areaXp: 2500 + index });
+      await joinTournament(user.id, tournament.id, { areaXp: 2500 + index, participantName: `Normal ${index}` });
     }
     await startTournament(admin.id, tournament.id);
     const phase = await prisma.tournamentPhase.create({

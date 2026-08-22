@@ -11,7 +11,7 @@ export async function POST(request: Request, context: Context) {
   try {
     const user = await requireUser();
     const { tournamentId } = await context.params;
-    const body = await readJson<{ areaXp: unknown }>(request);
+    const body = await readJson<{ areaXp: unknown; participantName: unknown }>(request);
     const participant = await joinTournament(user.id, tournamentId, body);
 
     return ok({ participant: serializeParticipant(participant) }, 201);

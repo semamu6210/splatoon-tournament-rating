@@ -59,7 +59,7 @@ async function createActiveTournamentWithPhase(playerCount: number) {
   for (let index = 0; index < playerCount; index += 1) {
     const player = await createUser(UserRole.PLAYER);
     players.push(player);
-    await joinTournament(player.id, tournament.id, { areaXp: 2400 + index });
+    await joinTournament(player.id, tournament.id, { areaXp: 2400 + index, participantName: `Player ${index}` });
   }
 
   await startTournament(admin.id, tournament.id);

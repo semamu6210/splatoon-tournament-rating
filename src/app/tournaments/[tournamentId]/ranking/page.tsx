@@ -19,6 +19,7 @@ function plainRankingRow(row: Awaited<ReturnType<typeof getTournamentRankings>>[
     userId: row.userId,
     playerName: row.playerName,
     discordUsername: row.discordUsername,
+    avatarUrl: row.avatarUrl,
     rating: row.rating,
     wins: row.wins,
     losses: row.losses,

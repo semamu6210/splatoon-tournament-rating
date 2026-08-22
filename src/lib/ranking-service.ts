@@ -4,7 +4,7 @@ import { formatRating } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 
 type RankedParticipant = TournamentParticipant & {
-  user: Pick<User, "id" | "name" | "discordUsername">;
+  user: Pick<User, "id" | "name" | "discordUsername"> & { avatarUrl?: string | null };
 };
 
 export type RankingRow = {
@@ -12,6 +12,7 @@ export type RankingRow = {
   userId: string;
   playerName: string | null;
   discordUsername: string | null;
+  avatarUrl: string | null;
   rating: string;
   wins: number;
   losses: number;
@@ -87,6 +88,7 @@ export function assignCompetitionRanks(participants: RankedParticipant[]): Ranki
       userId: participant.userId,
       playerName: participant.user.name,
       discordUsername: participant.user.discordUsername,
+      avatarUrl: participant.user.avatarUrl ?? null,
       rating: formatRating(rating),
       wins: participant.wins,
       losses: participant.losses,
@@ -135,7 +137,7 @@ export async function getPhaseTargetParticipants(phaseId: string) {
         where: { isEligible: true },
         include: {
           tournamentParticipant: {
-            include: { user: { select: { id: true, name: true, discordUsername: true } } },
+            include: { user: { select: { id: true, name: true, discordUsername: true, avatarUrl: true } } },
           },
         },
       },
@@ -158,7 +160,7 @@ export async function getPhaseTargetParticipants(phaseId: string) {
 
   const participants = await prisma.tournamentParticipant.findMany({
     where,
-    include: { user: { select: { id: true, name: true, discordUsername: true } } },
+    include: { user: { select: { id: true, name: true, discordUsername: true, avatarUrl: true } } },
     orderBy: { rating: "desc" },
   });
 
@@ -204,7 +206,7 @@ export async function getTournamentRankings(tournamentId: string) {
     },
     include: {
       user: {
-        select: { id: true, name: true, discordUsername: true },
+        select: { id: true, name: true, discordUsername: true, avatarUrl: true },
       },
     },
     orderBy: { rating: "desc" },
@@ -238,7 +240,7 @@ export async function getTournamentRankings(tournamentId: string) {
           participants: {
             include: {
               tournamentParticipant: {
-                include: { user: { select: { id: true, name: true, discordUsername: true } } },
+                include: { user: { select: { id: true, name: true, discordUsername: true, avatarUrl: true } } },
               },
             },
           },

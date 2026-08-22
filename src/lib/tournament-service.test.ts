@@ -10,6 +10,7 @@ import {
   openRegistration,
   startTournament,
   updateTournament,
+  updateParticipantName,
 } from "@/lib/tournament-service";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -93,7 +94,7 @@ describe("tournament service", () => {
     const tournament = await createDraftTournament(admin.id);
     await createRatingConfigVersion(admin.id, tournament.id, validRatingConfig());
     await openRegistration(admin.id, tournament.id);
-    await joinTournament(player.id, tournament.id, { areaXp: 2500 });
+    await joinTournament(player.id, tournament.id, { areaXp: 2500, participantName: "Active Player" });
     await startTournament(admin.id, tournament.id);
 
     await expect(
@@ -148,17 +149,49 @@ describe("tournament service", () => {
     const player = await createUser(UserRole.PLAYER);
     const tournament = await createDraftTournament(admin.id);
 
-    await expect(joinTournament(player.id, tournament.id, { areaXp: 2500 })).rejects.toThrow(
+    await expect(joinTournament(player.id, tournament.id, { areaXp: 2500, participantName: "Before Open" })).rejects.toThrow(
       "Tournament registration is not open.",
     );
 
     await openRegistration(admin.id, tournament.id);
-    const participant = await joinTournament(player.id, tournament.id, { areaXp: 2500 });
+    const participant = await joinTournament(player.id, tournament.id, { areaXp: 2500, participantName: "せまむ" });
 
     expect(participant.rating).toBeNull();
+    expect(participant.participantName).toBe("せまむ");
 
-    await expect(joinTournament(player.id, tournament.id, { areaXp: 2500 })).rejects.toThrow(
+    await expect(joinTournament(player.id, tournament.id, { areaXp: 2500, participantName: "Duplicate" })).rejects.toThrow(
       "Already joined this tournament.",
+    );
+  });
+
+  it("rejects invalid participant names", async () => {
+    const admin = await createUser(UserRole.ADMIN);
+    const player = await createUser(UserRole.PLAYER);
+    const tournament = await createDraftTournament(admin.id);
+    await openRegistration(admin.id, tournament.id);
+
+    await expect(joinTournament(player.id, tournament.id, { areaXp: 2500, participantName: "   " })).rejects.toThrow(
+      "participantName is required.",
+    );
+    await expect(joinTournament(player.id, tournament.id, { areaXp: 2500, participantName: "a".repeat(21) })).rejects.toThrow(
+      "participantName must be 20 characters or fewer.",
+    );
+  });
+
+  it("allows participant name changes during REGISTRATION and rejects them after ACTIVE", async () => {
+    const admin = await createUser(UserRole.ADMIN);
+    const player = await createUser(UserRole.PLAYER);
+    const tournament = await createDraftTournament(admin.id);
+    await createRatingConfigVersion(admin.id, tournament.id, validRatingConfig());
+    await openRegistration(admin.id, tournament.id);
+    await joinTournament(player.id, tournament.id, { areaXp: 2500, participantName: "Before" });
+
+    const renamed = await updateParticipantName(player, tournament.id, { participantName: "After" });
+    expect(renamed.participantName).toBe("After");
+
+    await startTournament(admin.id, tournament.id);
+    await expect(updateParticipantName(player, tournament.id, { participantName: "Blocked" })).rejects.toThrow(
+      "participantName can be changed only during REGISTRATION.",
     );
   });
 
@@ -185,8 +218,8 @@ describe("tournament service", () => {
     const tournament = await createDraftTournament(admin.id);
     const config = await createRatingConfigVersion(admin.id, tournament.id, validRatingConfig());
     await openRegistration(admin.id, tournament.id);
-    await joinTournament(playerA.id, tournament.id, { areaXp: 2367 });
-    await joinTournament(playerB.id, tournament.id, { areaXp: 3042 });
+    await joinTournament(playerA.id, tournament.id, { areaXp: 2367, participantName: "Player A" });
+    await joinTournament(playerB.id, tournament.id, { areaXp: 3042, participantName: "Player B" });
 
     const started = await startTournament(admin.id, tournament.id);
     const participants = await prisma.tournamentParticipant.findMany({
@@ -206,7 +239,7 @@ describe("tournament service", () => {
       expect(participant.initialRatingConfigVersion).toBe(1);
     }
 
-    await expect(joinTournament(playerA.id, tournament.id, { areaXp: 2500 })).rejects.toThrow(
+    await expect(joinTournament(playerA.id, tournament.id, { areaXp: 2500, participantName: "Late" })).rejects.toThrow(
       "Tournament registration is not open.",
     );
   });
@@ -229,7 +262,7 @@ describe("tournament service", () => {
     for (let index = 0; index < 8; index += 1) {
       const player = await createUser(UserRole.PLAYER);
       players.push(player);
-      await joinTournament(player.id, tournament.id, { areaXp: 2400 + index });
+      await joinTournament(player.id, tournament.id, { areaXp: 2400 + index, participantName: `Delete ${index}` });
     }
     await startTournament(admin.id, tournament.id);
     const phase = await prisma.tournamentPhase.create({

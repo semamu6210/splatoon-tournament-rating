@@ -54,12 +54,23 @@ export function serializeParticipant(
     user?: Pick<User, "id" | "name" | "discordUsername" | "avatarUrl" | "role">;
   },
 ) {
+  const { user, ...rest } = participant;
+
   return {
-    ...participant,
+    ...rest,
     rating: serializeDecimal(participant.rating),
     ratingInitializedAt: participant.ratingInitializedAt?.toISOString() ?? null,
     joinedAt: participant.joinedAt.toISOString(),
     createdAt: participant.createdAt.toISOString(),
     updatedAt: participant.updatedAt.toISOString(),
+    user: user
+      ? {
+          id: user.id,
+          name: user.name,
+          discordUsername: user.discordUsername,
+          avatarUrl: user.avatarUrl,
+          role: user.role,
+        }
+      : undefined,
   };
 }

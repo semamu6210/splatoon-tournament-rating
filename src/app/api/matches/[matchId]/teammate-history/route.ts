@@ -15,7 +15,7 @@ export async function GET(_request: Request, context: Context) {
       include: {
         players: {
           include: {
-            user: { select: { id: true, name: true, discordUsername: true } },
+            user: { select: { id: true, name: true, avatarUrl: true } },
           },
         },
       },
@@ -37,19 +37,26 @@ export async function GET(_request: Request, context: Context) {
         },
       },
       include: {
-        user: { select: { id: true, name: true, discordUsername: true } },
+        user: { select: { id: true, name: true, avatarUrl: true } },
         match: { select: { id: true, winnerTeam: true, createdAt: true } },
       },
       orderBy: { match: { createdAt: "desc" } },
       take: teammateIds.length * 5,
     });
 
+    const participants = await prisma.tournamentParticipant.findMany({
+      where: { tournamentId: match.tournamentId, userId: { in: teammateIds } },
+      select: { userId: true, participantName: true },
+    });
+    const participantByUserId = new Map(participants.map((participant) => [participant.userId, participant]));
+
     return ok({
       teammates: teammateIds.map((teammateId) => {
         const player = match.players.find((item) => item.userId === teammateId)!;
         return {
           userId: teammateId,
-          participantName: player.user.discordUsername ?? player.user.name ?? teammateId,
+          participantName: participantByUserId.get(teammateId)?.participantName ?? player.user.name ?? teammateId,
+          avatarUrl: player.user.avatarUrl,
           recentMatches: histories
             .filter((history) => history.userId === teammateId)
             .slice(0, 5)

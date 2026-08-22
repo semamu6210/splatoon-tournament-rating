@@ -78,3 +78,25 @@ export function areaXpValue(value: unknown) {
 
   return value;
 }
+
+export function participantNameValue(value: unknown) {
+  if (typeof value !== "string") {
+    throw new ApiError(400, "participantName is required.");
+  }
+
+  const text = value.trim();
+  if (text.length === 0) {
+    throw new ApiError(400, "participantName is required.");
+  }
+  if (text.length > 20) {
+    throw new ApiError(400, "participantName must be 20 characters or fewer.");
+  }
+  if (/[\r\n]/.test(text)) {
+    throw new ApiError(400, "participantName cannot contain line breaks.");
+  }
+  if (/[\u0000-\u001f\u007f]/.test(text)) {
+    throw new ApiError(400, "participantName contains invalid characters.");
+  }
+
+  return text;
+}

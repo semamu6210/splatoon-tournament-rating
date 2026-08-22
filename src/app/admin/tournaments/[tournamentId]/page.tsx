@@ -6,6 +6,7 @@ import { ApiButton } from "@/components/api-button";
 import { BlockManagementPanel } from "@/components/block-management-panel";
 import { MatchmakingRunButton } from "@/components/matchmaking-run-button";
 import { PhaseForm } from "@/components/phase-form";
+import { PlayerAvatar } from "@/components/player-avatar";
 import { RatingConfigForm } from "@/components/rating-config-form";
 import { RankingTabs } from "@/components/ranking-tabs";
 import { TournamentDeleteButton } from "@/components/tournament-delete-button";
@@ -33,6 +34,7 @@ function plainRankingRow(row: Awaited<ReturnType<typeof getTournamentRankings>>[
     userId: row.userId,
     playerName: row.playerName,
     discordUsername: row.discordUsername,
+    avatarUrl: row.avatarUrl,
     rating: row.rating,
     wins: row.wins,
     losses: row.losses,
@@ -90,6 +92,7 @@ function plainAdvancementRows(rows: Awaited<ReturnType<typeof getTournamentRanki
     userId: row.userId,
     playerName: row.playerName,
     discordUsername: row.discordUsername,
+    participantName: row.participantName,
     rank: row.rank,
     rating: row.rating,
   }));
@@ -105,13 +108,13 @@ function previewRequiredSelections(preview: Awaited<ReturnType<typeof getQualifi
 function previewBoundaryLabels(preview: Awaited<ReturnType<typeof getQualifierAdvancementPreview>> | null) {
   if (!preview) return "";
   const rows = "blocks" in preview ? preview.blocks.flatMap((block) => block.boundaryTieRows) : preview.boundaryTieRows;
-  return rows.map((row) => row.discordUsername ?? row.playerName ?? row.userId).join(", ");
+  return rows.map((row) => row.participantName ?? row.playerName ?? row.userId).join(", ");
 }
 
 function previewAutoLabels(preview: Awaited<ReturnType<typeof getQualifierAdvancementPreview>> | null) {
   if (!preview) return "";
   const rows = "blocks" in preview ? preview.blocks.flatMap((block) => block.autoAdvanceRows) : preview.autoAdvanceRows;
-  return rows.map((row) => row.discordUsername ?? row.playerName ?? row.userId).join(", ");
+  return rows.map((row) => row.participantName ?? row.playerName ?? row.userId).join(", ");
 }
 
 export default async function AdminTournamentPage({ params }: PageProps) {
@@ -126,7 +129,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
           participants: {
             include: {
               user: {
-                select: { id: true, name: true, discordUsername: true, role: true },
+                select: { id: true, name: true, discordUsername: true, avatarUrl: true, role: true },
               },
             },
             orderBy: { joinedAt: "asc" },
@@ -137,7 +140,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                 where: { status: "WAITING" },
                 include: {
                   user: {
-                    select: { id: true, name: true, discordUsername: true },
+                    select: { id: true, name: true, discordUsername: true, avatarUrl: true },
                   },
                 },
                 orderBy: { joinedAt: "asc" },
@@ -218,6 +221,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
     (sum, phase) => sum + phase.matches.filter((match) => match.status === "VOTE_REPORTING").length,
     0,
   );
+  const participantByUserId = new Map(tournament.participants.map((participant) => [participant.userId, participant]));
 
   return (
     <main className="min-h-screen px-5 py-8">
@@ -371,8 +375,11 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                 <p className="mt-3 text-sm font-semibold">待機中人数: {phase.queueEntries.length}</p>
                 <ul className="mt-2 grid gap-1 text-sm text-zinc-700">
                   {phase.queueEntries.map((entry) => (
-                    <li key={entry.id}>
-                      {entry.user.discordUsername ?? entry.user.name ?? entry.userId} / {entry.joinedAt.toLocaleString("ja-JP")}
+                    <li className="flex items-center gap-2" key={entry.id}>
+                      <PlayerAvatar avatarUrl={entry.user.avatarUrl} name={participantByUserId.get(entry.userId)?.participantName ?? entry.user.name ?? entry.userId} size={28} />
+                      <span>
+                        {participantByUserId.get(entry.userId)?.participantName ?? entry.user.name ?? entry.userId} / {entry.joinedAt.toLocaleString("ja-JP")}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -436,13 +443,21 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                 {tournament.participants.map((participant) => (
                   <tr className="border-t border-zinc-200" key={participant.id}>
                     <td className="px-3 py-2">
-                      {participant.participantName}{" "}
-                      {participant.isDummy && <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">テスト参加者</span>}{" "}
-                      {participant.winningStreak >= 3
-                        ? `🔥 ${participant.winningStreak}連勝`
-                        : participant.losingStreak >= 3
-                          ? `▼ ${participant.losingStreak}連敗`
-                          : ""}
+                      <div className="flex items-center gap-3">
+                        <PlayerAvatar avatarUrl={participant.user.avatarUrl} name={participant.participantName} size={32} />
+                        <div>
+                          <p className="font-semibold">
+                            {participant.participantName}{" "}
+                            {participant.isDummy && <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">テスト参加者</span>}{" "}
+                            {participant.winningStreak >= 3
+                              ? `🔥 ${participant.winningStreak}連勝`
+                              : participant.losingStreak >= 3
+                                ? `▼ ${participant.losingStreak}連敗`
+                                : ""}
+                          </p>
+                          <p className="text-xs text-zinc-600">Discord: {participant.user.discordUsername ?? "-"}</p>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-3 py-2">{participant.areaXp}</td>
                     <td className="px-3 py-2">{participant.blockName ?? "-"}</td>

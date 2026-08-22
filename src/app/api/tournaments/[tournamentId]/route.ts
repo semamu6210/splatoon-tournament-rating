@@ -2,7 +2,6 @@ import { requireAdmin, requireUser } from "@/lib/authz";
 import { fail, ok, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import {
-  serializeParticipant,
   serializeRatingConfig,
   serializeTournament,
 } from "@/lib/serializers";
@@ -25,9 +24,7 @@ export async function GET(_request: Request, context: Context) {
               select: {
                 id: true,
                 name: true,
-                discordUsername: true,
                 avatarUrl: true,
-                role: true,
               },
             },
           },
@@ -47,7 +44,18 @@ export async function GET(_request: Request, context: Context) {
     return ok({
       tournament: serializeTournament(tournament),
       activeRatingConfig: activeRatingConfig ? serializeRatingConfig(activeRatingConfig) : null,
-      participants: tournament.participants.map(serializeParticipant),
+      participants: tournament.participants.map((participant) => ({
+        id: participant.id,
+        userId: participant.userId,
+        participantName: participant.participantName,
+        avatarUrl: participant.user.avatarUrl,
+        rating: participant.rating?.toString() ?? null,
+        wins: participant.wins,
+        losses: participant.losses,
+        matchesPlayed: participant.matchesPlayed,
+        areaXp: participant.areaXp,
+        joinedAt: participant.joinedAt.toISOString(),
+      })),
     });
   } catch (error) {
     return fail(error);

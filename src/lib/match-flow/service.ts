@@ -108,7 +108,7 @@ export async function submitResultReport(userId: string, matchId: string, report
   });
 
   await submitAutomaticTestVotesIfAllowed(matchId);
-  await applyRatingIfAllVotesComplete(matchId);
+  await attemptAutoApplyRatingForMatch(matchId);
   return match;
 }
 
@@ -199,7 +199,7 @@ export async function submitPlayerVotes(userId: string, matchId: string, votes: 
     return tx.playerVote.findMany({ where: { matchId, voterUserId: userId } });
   });
 
-  await applyRatingIfAllVotesComplete(matchId);
+  await attemptAutoApplyRatingForMatch(matchId);
   return submittedVotes;
 }
 
@@ -410,31 +410,62 @@ export async function applyRating(matchId: string) {
   }
 }
 
-async function applyRatingIfAllVotesComplete(matchId: string) {
+export async function attemptAutoApplyRatingForMatch(matchId: string) {
   const match = await prisma.match.findUnique({
     where: { id: matchId },
-    include: { players: true, playerVotes: true },
+    include: {
+      players: { select: { userId: true } },
+      playerVotes: { select: { voterUserId: true, voteType: true } },
+    },
   });
-  if (!match || match.status !== "VOTE_REPORTING" || !match.winnerTeam || match.ratingAppliedAt || match.players.length !== 8) {
-    return;
-  }
 
+  if (!match) return { applied: false as const, reason: "MATCH_NOT_FOUND" as const };
+
+  const playerUserIds = new Set(match.players.map((player) => player.userId));
   const completeVoterIds = new Set<string>();
-  for (const player of match.players) {
-    const userVotes = match.playerVotes.filter((vote) => vote.voterUserId === player.userId);
+  for (const userId of playerUserIds) {
+    const userVotes = match.playerVotes.filter((vote) => vote.voterUserId === userId);
     if (userVotes.some((vote) => vote.voteType === "STRONG") && userVotes.some((vote) => vote.voteType === "WEAK")) {
-      completeVoterIds.add(player.userId);
+      completeVoterIds.add(userId);
     }
   }
-  if (completeVoterIds.size !== 8) return;
+
+  const context = {
+    matchId,
+    status: match.status,
+    submittedVoterCount: completeVoterIds.size,
+    winnerTeam: match.winnerTeam,
+    ratingAppliedAt: match.ratingAppliedAt?.toISOString() ?? null,
+  };
+
+  if (match.status !== "VOTE_REPORTING") {
+    return { applied: false as const, reason: "STATUS_NOT_READY" as const, ...context };
+  }
+  if (!match.winnerTeam) {
+    return { applied: false as const, reason: "WINNER_NOT_READY" as const, ...context };
+  }
+  if (match.ratingAppliedAt) {
+    return { applied: false as const, reason: "ALREADY_APPLIED" as const, ...context };
+  }
+  if (match.players.length !== 8) {
+    return { applied: false as const, reason: "PLAYER_COUNT_NOT_READY" as const, ...context };
+  }
+  if (completeVoterIds.size !== 8) {
+    return { applied: false as const, reason: "VOTES_INCOMPLETE" as const, ...context };
+  }
 
   try {
     await applyRating(matchId);
+    return { applied: true as const, ...context };
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) {
-      return;
+      return { applied: false as const, reason: "ALREADY_CLAIMED" as const, ...context };
     }
-    console.error("Automatic rating application failed.", error);
+    console.error("AUTO_RATING_APPLY_FAILED", {
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { applied: false as const, reason: "APPLY_FAILED" as const, ...context };
   }
 }
 

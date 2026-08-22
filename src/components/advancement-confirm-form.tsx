@@ -8,6 +8,7 @@ type AdvancementRow = {
   userId: string;
   playerName: string | null;
   discordUsername: string | null;
+  participantName: string;
   rank: number;
   rating: string;
 };
@@ -39,7 +40,7 @@ type AdvancementConfirmFormProps = {
 };
 
 function label(row: AdvancementRow) {
-  return `${row.discordUsername ?? row.playerName ?? row.userId} / ${row.rank}位 / ${row.rating}`;
+  return `${row.participantName || row.playerName || row.userId} / ${row.rank}位 / ${row.rating}`;
 }
 
 export function AdvancementConfirmForm({ phaseId, preview }: AdvancementConfirmFormProps) {

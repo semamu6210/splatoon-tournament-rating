@@ -3,6 +3,8 @@ import Link from "next/link";
 import { AuthControls } from "@/components/auth-controls";
 import { ApiButton } from "@/components/api-button";
 import { JoinForm } from "@/components/join-form";
+import { ParticipantNameForm } from "@/components/participant-name-form";
+import { PlayerAvatar } from "@/components/player-avatar";
 import { QueuePanel } from "@/components/queue-panel";
 import { RankingTabs } from "@/components/ranking-tabs";
 import { auth } from "@/auth";
@@ -24,6 +26,7 @@ function plainRankingRow(row: Awaited<ReturnType<typeof getTournamentRankings>>[
     userId: row.userId,
     playerName: row.playerName,
     discordUsername: row.discordUsername,
+    avatarUrl: row.avatarUrl,
     rating: row.rating,
     wins: row.wins,
     losses: row.losses,
@@ -50,7 +53,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
         where: { isActive: true },
         include: {
           user: {
-            select: { id: true, name: true, discordUsername: true },
+            select: { id: true, name: true, discordUsername: true, avatarUrl: true },
           },
         },
         orderBy: { joinedAt: "asc" },
@@ -213,6 +216,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           {session?.user && myParticipant && (
             <div className="mt-3 grid gap-2 text-sm">
               <p>登録済み / XP: {myParticipant.areaXp}</p>
+              <p>参加名: {myParticipant.participantName}</p>
               <p>現在レート: {myParticipant.rating ? formatRating(myParticipant.rating) : "大会開始前"}</p>
               {myRanking?.currentPhase && (
                 <p>
@@ -231,13 +235,16 @@ export default async function TournamentDetailPage({ params }: PageProps) {
               <p>大会累計 1票目: {voteCount(myVoteStats, "STRONG")} / 2票目: {voteCount(myVoteStats, "WEAK")}</p>
               <p>現在フェーズ 1票目: {voteCount(myPhaseVoteStats, "STRONG")} / 2票目: {voteCount(myPhaseVoteStats, "WEAK")}</p>
               {tournament.status === "REGISTRATION" && (
-                <ApiButton url={`/api/tournaments/${tournament.id}/leave`}>参加取消</ApiButton>
+                <div className="grid gap-3">
+                  <ParticipantNameForm initialParticipantName={myParticipant.participantName} tournamentId={tournament.id} />
+                  <ApiButton url={`/api/tournaments/${tournament.id}/leave`}>参加取消</ApiButton>
+                </div>
               )}
             </div>
           )}
           {session?.user && !myParticipant && tournament.status === "REGISTRATION" && (
             <div className="mt-3">
-              <JoinForm tournamentId={tournament.id} />
+              <JoinForm initialParticipantName={session.user.discordUsername ?? session.user.name ?? ""} tournamentId={tournament.id} />
             </div>
           )}
           {session?.user && !myParticipant && tournament.status !== "REGISTRATION" && (
@@ -250,17 +257,26 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           <ul className="mt-3 grid gap-2 text-sm">
             {tournament.participants.map((participant) => (
               <li className="border-b border-zinc-100 pb-2" key={participant.id}>
-                {participant.participantName}{" "}
-                {participant.winningStreak >= 3 ? (
-                  <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={`🔥 ${participant.winningStreak}連勝中`} type="button">
-                    🔥 {participant.winningStreak}連勝
-                  </button>
-                ) : participant.losingStreak >= 3 ? (
-                  <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={`▼ ${participant.losingStreak}連敗中`} type="button">
-                    ▼ {participant.losingStreak}連敗
-                  </button>
-                ) : null}{" "}
-                / 現在レート {formatRating(participant.rating)} / {participant.wins}勝{participant.losses}敗 / 試合 {participant.matchesPlayed}
+                <div className="flex items-center gap-3">
+                  <PlayerAvatar avatarUrl={participant.user.avatarUrl} name={participant.participantName} />
+                  <div>
+                    <p className="font-semibold">
+                      {participant.participantName}{" "}
+                      {participant.winningStreak >= 3 ? (
+                        <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={`🔥 ${participant.winningStreak}連勝中`} type="button">
+                          🔥 {participant.winningStreak}連勝
+                        </button>
+                      ) : participant.losingStreak >= 3 ? (
+                        <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={`▼ ${participant.losingStreak}連敗中`} type="button">
+                          ▼ {participant.losingStreak}連敗
+                        </button>
+                      ) : null}
+                    </p>
+                    <p className="text-zinc-600">
+                      現在レート {formatRating(participant.rating)} / {participant.wins}勝{participant.losses}敗 / 試合 {participant.matchesPlayed}
+                    </p>
+                  </div>
+                </div>
               </li>
             ))}
           </ul>

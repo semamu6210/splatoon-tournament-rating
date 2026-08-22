@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { PlayerAvatar } from "@/components/player-avatar";
 import { tournamentPhaseTypeLabel } from "@/lib/labels";
 
 type RankingRow = {
@@ -9,6 +10,7 @@ type RankingRow = {
   userId: string;
   playerName: string | null;
   discordUsername: string | null;
+  avatarUrl: string | null;
   rating: string;
   wins: number;
   losses: number;
@@ -42,7 +44,7 @@ type RankingTabsProps = {
 };
 
 function playerLabel(row: RankingRow) {
-  return row.participantName ?? row.discordUsername ?? row.playerName ?? row.userId;
+  return row.participantName || row.playerName || row.userId;
 }
 
 function DummyBadge({ show }: { show: boolean }) {
@@ -81,13 +83,16 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
         {active.rows.map((row) => (
           <div className="rounded-md border border-zinc-200 bg-white p-3 text-sm" key={row.userId}>
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="flex min-w-0 items-start gap-3">
+                <PlayerAvatar avatarUrl={row.avatarUrl} name={playerLabel(row)} />
+                <div className="min-w-0">
                 <p className="font-semibold">
                   {row.rank}位 {playerLabel(row)} <DummyBadge show={row.isDummy} />
                 </p>
                 <p className="mt-1 text-zinc-600">
                   現在レート {row.rating} / {row.wins}勝{row.losses}敗
                 </p>
+                </div>
               </div>
               {row.streakBadge && (
                 <span className="shrink-0 rounded bg-zinc-100 px-2 py-1 text-xs" title={row.streakBadge}>
@@ -129,12 +134,17 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
               <tr className="border-t border-zinc-200" key={row.userId}>
                 <td className="px-3 py-2">{row.rank}</td>
                 <td className="px-3 py-2">
-                  {playerLabel(row)} <DummyBadge show={row.isDummy} />{" "}
-                  {row.streakBadge && (
-                    <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={row.streakBadge} type="button">
-                      {row.streakBadge}
-                    </button>
-                  )}
+                  <div className="flex items-center gap-3">
+                    <PlayerAvatar avatarUrl={row.avatarUrl} name={playerLabel(row)} size={32} />
+                    <span>
+                      {playerLabel(row)} <DummyBadge show={row.isDummy} />{" "}
+                      {row.streakBadge && (
+                        <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={row.streakBadge} type="button">
+                          {row.streakBadge}
+                        </button>
+                      )}
+                    </span>
+                  </div>
                 </td>
                 <td className="px-3 py-2">{row.rating}</td>
                 <td className="px-3 py-2">

@@ -57,10 +57,11 @@ export async function getMatchViewForUser(matchId: string, user: AuthenticatedUs
     const participant = participantByUserId.get(player.userId);
     return {
       userId: player.userId,
-      user: player.user,
       participantName: participant?.participantName ?? player.user.discordUsername ?? player.user.name ?? player.userId,
       isDummy: participant?.isDummy ?? false,
       team: player.team,
+      avatarUrl: player.user.avatarUrl,
+      user: { id: player.user.id, avatarUrl: player.user.avatarUrl },
       ratingBefore: serializeDecimal(player.ratingBefore),
       areaXpAtMatch: player.areaXpAtMatch,
       wins: participant?.wins ?? 0,
@@ -101,8 +102,10 @@ export async function getMatchViewForUser(matchId: string, user: AuthenticatedUs
       roomHost: match.roomHost
         ? {
             id: match.roomHost.id,
-            name: match.roomHost.name,
-            discordUsername: match.roomHost.discordUsername,
+            participantName:
+              participantByUserId.get(match.roomHost.id)?.participantName ??
+              match.roomHost.name ??
+              match.roomHost.id,
             avatarUrl: match.roomHost.avatarUrl,
           }
         : null,

@@ -7,6 +7,7 @@ import { AdminMatchActions } from "@/components/admin-match-actions";
 import { ApiButton } from "@/components/api-button";
 import { AuthControls } from "@/components/auth-controls";
 import { MatchStatusRefresh } from "@/components/match-status-refresh";
+import { PlayerAvatar } from "@/components/player-avatar";
 import { PlayerVoteForm } from "@/components/player-vote-form";
 import { ResultReportForm } from "@/components/result-report-form";
 import { auth } from "@/auth";
@@ -36,7 +37,7 @@ export default async function MatchPage({ params }: PageProps) {
       players: {
         include: {
           user: {
-            select: { id: true, name: true, discordUsername: true },
+            select: { id: true, name: true, discordUsername: true, avatarUrl: true },
           },
         },
         orderBy: [{ team: "asc" }, { userId: "asc" }],
@@ -47,7 +48,7 @@ export default async function MatchPage({ params }: PageProps) {
       tournament: { select: { name: true, isTestTournament: true } },
       stage: true,
       phase: { select: { phaseType: true, rule: true } },
-      roomHost: { select: { id: true, name: true, discordUsername: true } },
+      roomHost: { select: { id: true, name: true, discordUsername: true, avatarUrl: true } },
     },
   });
 
@@ -119,10 +120,15 @@ export default async function MatchPage({ params }: PageProps) {
   const myVotes = user ? match.playerVotes.filter((vote) => vote.voterUserId === user.id) : [];
   const myVoteComplete =
     myVotes.some((vote) => vote.voteType === "STRONG") && myVotes.some((vote) => vote.voteType === "WEAK");
+  const ratingCalculationPending =
+    match.status === "VOTE_REPORTING" &&
+    completeVoteSubmittedUserIds.size === 8 &&
+    Boolean(match.winnerTeam) &&
+    !match.ratingAppliedAt;
   const imagePath = stageImagePath(match.stage?.name ?? match.stageName);
   const visibleImagePath = publicImageExists(imagePath) ? imagePath : null;
   const hostLabel = match.roomHost
-    ? match.roomHost.discordUsername ?? match.roomHost.name ?? match.roomHost.id
+    ? participantByUserId.get(match.roomHost.id)?.participantName ?? match.roomHost.name ?? match.roomHost.id
     : "未設定";
   const isRoomHost = Boolean(user && match.roomHostUserId === user.id);
   const shouldAutoRefresh = ["PLAYING", "RESULT_REPORTING", "VOTE_REPORTING"].includes(match.status);
@@ -140,18 +146,23 @@ export default async function MatchPage({ params }: PageProps) {
     const rows = showRecent ? teammateHistories.filter((history) => history.userId === player.userId).slice(0, 3) : [];
     return (
       <li className="rounded-md bg-zinc-50 p-3 text-sm" key={player.id}>
-        <p className="font-semibold">
-          {playerLabel(player)}{" "}
-          {participant?.isDummy && <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">テスト参加者</span>}{" "}
-          {badge && (
-            <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={badge} type="button">
-              {badge}
-            </button>
-          )}
-        </p>
-        <p className="mt-1 text-zinc-600">
-          現在レート: {formatRating(participant?.rating ?? player.ratingBefore)} / {participant?.wins ?? 0}勝{participant?.losses ?? 0}敗
-        </p>
+        <div className="flex items-start gap-3">
+          <PlayerAvatar avatarUrl={player.user.avatarUrl} name={playerLabel(player)} />
+          <div className="min-w-0">
+            <p className="font-semibold">
+              {playerLabel(player)}{" "}
+              {participant?.isDummy && <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">テスト参加者</span>}{" "}
+              {badge && (
+                <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={badge} type="button">
+                  {badge}
+                </button>
+              )}
+            </p>
+            <p className="mt-1 text-zinc-600">
+              公開レート: {formatRating(participant?.rating ?? player.ratingBefore)} / {participant?.wins ?? 0}勝{participant?.losses ?? 0}敗
+            </p>
+          </div>
+        </div>
         {showRecent && (
           <ul className="mt-2 grid gap-1 text-xs text-zinc-600">
             {rows.map((history) => (
@@ -162,11 +173,6 @@ export default async function MatchPage({ params }: PageProps) {
             ))}
             {rows.length === 0 && <li>直近履歴なし</li>}
           </ul>
-        )}
-        {isAdmin && (
-          <p className="mt-1 text-zinc-600">
-            内部マッチングレート: {formatRating(player.matchingRatingAtMatch)} / 連敗補正: {player.losingStreakAtMatch}
-          </p>
         )}
       </li>
     );
@@ -315,6 +321,7 @@ export default async function MatchPage({ params }: PageProps) {
               <p>投票完了: {completeVoteSubmittedUserIds.size} / 8</p>
               <p>投票受付: {match.votingClosedAt ? `締切済み (${match.votingClosedAt.toLocaleString("ja-JP")})` : "受付中"}</p>
             </div>
+            {ratingCalculationPending && <p className="text-sm font-semibold text-emerald-700">レートを計算しています...</p>}
             {!match.votingClosedAt && !myVoteComplete && <PlayerVoteForm matchId={match.id} opponents={opponents} />}
             {!match.votingClosedAt && myVoteComplete && <p className="text-sm text-zinc-600">他の参加者の投票を待っています。</p>}
             {match.votingClosedAt && <p className="text-sm text-zinc-600">ADMINにより投票受付は締め切られました。</p>}
@@ -366,7 +373,7 @@ export default async function MatchPage({ params }: PageProps) {
                   const report = match.resultReports.find((item) => item.userId === player.userId);
                   return (
                     <li key={player.userId}>
-                      {player.user.discordUsername ?? player.user.name ?? player.userId}: {report?.reportedWinnerTeam ?? "未報告"}
+                      {playerLabel(player)}: {report?.reportedWinnerTeam ?? "未報告"}
                     </li>
                   );
                 })}
@@ -375,7 +382,7 @@ export default async function MatchPage({ params }: PageProps) {
               <ul className="mt-2 grid gap-1 text-sm">
                 {match.players.map((player) => (
                   <li key={player.userId}>
-                    {player.user.discordUsername ?? player.user.name ?? player.userId}:{" "}
+                    {playerLabel(player)}:{" "}
                     {completeVoteSubmittedUserIds.has(player.userId) ? "提出済み" : "未提出"}
                   </li>
                 ))}

@@ -3,12 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-type JoinFormProps = {
+type ParticipantNameFormProps = {
   tournamentId: string;
-  initialParticipantName?: string;
+  initialParticipantName: string;
 };
 
-export function JoinForm({ tournamentId, initialParticipantName = "" }: JoinFormProps) {
+export function ParticipantNameForm({ tournamentId, initialParticipantName }: ParticipantNameFormProps) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -19,29 +19,26 @@ export function JoinForm({ tournamentId, initialParticipantName = "" }: JoinForm
     setMessage(null);
 
     const form = new FormData(event.currentTarget);
-    const areaXp = Number(form.get("areaXp"));
     const participantName = String(form.get("participantName") ?? "");
-
-    const response = await fetch(`/api/tournaments/${tournamentId}/join`, {
-      method: "POST",
+    const response = await fetch(`/api/tournaments/${tournamentId}/me`, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ areaXp, participantName }),
+      body: JSON.stringify({ participantName }),
     });
     const json = (await response.json().catch(() => null)) as { error?: string } | null;
-
     setPending(false);
 
     if (!response.ok) {
-      setMessage(json?.error ?? "参加登録に失敗しました。");
+      setMessage(json?.error ?? "参加名の変更に失敗しました。");
       return;
     }
 
-    setMessage("参加登録しました。");
+    setMessage("参加名を変更しました。");
     router.refresh();
   }
 
   return (
-    <form className="grid gap-3" onSubmit={onSubmit}>
+    <form className="grid gap-2" onSubmit={onSubmit}>
       <label className="grid gap-1 text-sm">
         参加名
         <input
@@ -53,19 +50,8 @@ export function JoinForm({ tournamentId, initialParticipantName = "" }: JoinForm
           type="text"
         />
       </label>
-      <label className="grid gap-1 text-sm">
-        エリアXP
-        <input
-          className="rounded-md border border-zinc-300 px-3 py-2"
-          min={0}
-          name="areaXp"
-          required
-          step={1}
-          type="number"
-        />
-      </label>
-      <button className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-zinc-400" disabled={pending}>
-        {pending ? "登録中..." : "参加登録"}
+      <button className="w-fit rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold disabled:bg-zinc-100" disabled={pending} type="submit">
+        {pending ? "保存中..." : "参加名を保存"}
       </button>
       {message && <p className="text-sm text-zinc-700">{message}</p>}
     </form>

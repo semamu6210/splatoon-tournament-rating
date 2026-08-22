@@ -16,7 +16,7 @@ export async function GET(_request: Request, context: Context) {
         participants: {
           include: {
             tournamentParticipant: {
-              include: { user: { select: { id: true, name: true, discordUsername: true } } },
+              include: { user: { select: { id: true, name: true, avatarUrl: true } } },
             },
           },
         },

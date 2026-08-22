@@ -43,6 +43,7 @@ export async function GET(_request: Request, context: Context) {
           id: participant.id,
           userId: participant.userId,
           participantName: participant.participantName,
+          avatarUrl: participant.user.avatarUrl,
           rating: participant.rating?.toString() ?? null,
           wins: participant.wins,
           losses: participant.losses,

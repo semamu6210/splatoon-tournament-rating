@@ -90,6 +90,7 @@ async function main() {
     players.map((player, index) =>
       joinTournament(player.id, tournament.id, {
         areaXp: 1800 + ((index * 73) % 900),
+        participantName: player.discordUsername ?? player.name ?? `Player ${index + 1}`,
       }),
     ),
   );

@@ -74,7 +74,7 @@ async function createReadyMatch(options?: {
   for (let index = 0; index < 8; index += 1) {
     const player = await createUser(UserRole.PLAYER);
     players.push(player);
-    await joinTournament(player.id, tournament.id, { areaXp: areaXps[index] });
+    await joinTournament(player.id, tournament.id, { areaXp: areaXps[index], participantName: `Player ${index}` });
   }
   await startTournament(admin.id, tournament.id);
   const phase = await prisma.tournamentPhase.create({
@@ -337,9 +337,38 @@ describe("result reports and rating application", () => {
     ]);
 
     reloaded = await prisma.match.findUniqueOrThrow({ where: { id: match.id } });
+    const votes = await prisma.playerVote.findMany({ where: { matchId: match.id } });
     expect(reloaded.status).toBe("CONFIRMED");
     expect(reloaded.ratingAppliedAt).toBeInstanceOf(Date);
+    expect(votes).toHaveLength(16);
+    expect(new Set(votes.map((vote) => vote.voterUserId))).toHaveLength(8);
     expect(await prisma.ratingHistory.count({ where: { matchId: match.id } })).toBe(8);
+  });
+
+  it("auto-applies independently for separate matches", async () => {
+    const first = await createReadyMatch();
+    const second = await createReadyMatch();
+    await forceResult(first.admin.id, first.match.id, "A", "test");
+    await forceResult(second.admin.id, second.match.id, "B", "test");
+
+    await voteAll(first.match.id);
+
+    let firstMatch = await prisma.match.findUniqueOrThrow({ where: { id: first.match.id } });
+    let secondMatch = await prisma.match.findUniqueOrThrow({ where: { id: second.match.id } });
+    expect(firstMatch.status).toBe("CONFIRMED");
+    expect(await prisma.ratingHistory.count({ where: { matchId: first.match.id } })).toBe(8);
+    expect(secondMatch.status).toBe("VOTE_REPORTING");
+    expect(secondMatch.ratingAppliedAt).toBeNull();
+    expect(await prisma.ratingHistory.count({ where: { matchId: second.match.id } })).toBe(0);
+
+    await voteAll(second.match.id);
+
+    firstMatch = await prisma.match.findUniqueOrThrow({ where: { id: first.match.id } });
+    secondMatch = await prisma.match.findUniqueOrThrow({ where: { id: second.match.id } });
+    expect(firstMatch.status).toBe("CONFIRMED");
+    expect(secondMatch.status).toBe("CONFIRMED");
+    expect(await prisma.ratingHistory.count({ where: { matchId: first.match.id } })).toBe(8);
+    expect(await prisma.ratingHistory.count({ where: { matchId: second.match.id } })).toBe(8);
   });
 
   it("auto-apply remains single when final votes arrive concurrently", async () => {

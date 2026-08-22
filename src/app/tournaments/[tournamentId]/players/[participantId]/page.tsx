@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { PlayerAvatar } from "@/components/player-avatar";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getTournamentRankings } from "@/lib/ranking-service";
@@ -15,7 +16,7 @@ export default async function PlayerProfilePage({ params }: PageProps) {
   const session = await auth();
   const participant = await prisma.tournamentParticipant.findUnique({
     where: { id: participantId },
-    include: { blockParticipations: { include: { block: true } } },
+    include: { blockParticipations: { include: { block: true } }, user: { select: { avatarUrl: true } } },
   });
   if (!participant || participant.tournamentId !== tournamentId || !participant.isActive) {
     return <main className="px-5 py-8">参加者が見つかりません。</main>;
@@ -51,7 +52,10 @@ export default async function PlayerProfilePage({ params }: PageProps) {
       <section className="mx-auto grid max-w-3xl gap-6">
         <header className="border-b border-zinc-300 pb-5">
           <Link className="text-sm text-zinc-600" href={`/tournaments/${tournamentId}`}>← 大会詳細</Link>
-          <h1 className="mt-3 text-3xl font-bold">{participant.participantName}</h1>
+          <div className="mt-3 flex items-center gap-4">
+            <PlayerAvatar avatarUrl={participant.user.avatarUrl} name={participant.participantName} size={56} />
+            <h1 className="text-3xl font-bold">{participant.participantName}</h1>
+          </div>
           {badge && <p className="mt-2 text-sm font-semibold">{badge}</p>}
         </header>
         <section className="rounded-md border border-zinc-300 bg-white p-4 text-sm">

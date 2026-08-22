@@ -1,7 +1,7 @@
 import { Prisma, TournamentStatus, type Team, type UserRole } from "@prisma/client";
 
 import { ApiError } from "@/lib/http";
-import { applyRating } from "@/lib/match-flow/service";
+import { attemptAutoApplyRatingForMatch } from "@/lib/match-flow/service";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { ensureTestDummiesWaitingForPhase } from "@/lib/test-dummy-queue";
@@ -185,7 +185,7 @@ export async function submitTestDummyVotes(
     },
   });
 
-  await applyRatingIfComplete(matchId);
+  await attemptAutoApplyRatingForMatch(matchId);
   return { submitted: result.submitted, skipped: result.skipped };
 }
 
@@ -231,32 +231,8 @@ export async function fullyAutomateTestMatch(adminUserId: string, adminRole: Use
 
   if (match.status !== "CONFIRMED") {
     await submitAutomaticTestVotes(matchId, { includeRealPlayersWhenAllDummy: true });
-    await applyRatingIfComplete(matchId);
+    await attemptAutoApplyRatingForMatch(matchId);
   }
 
   return prisma.match.findUniqueOrThrow({ where: { id: matchId } });
-}
-
-async function applyRatingIfComplete(matchId: string) {
-  const match = await prisma.match.findUnique({
-    where: { id: matchId },
-    include: { players: true, playerVotes: true },
-  });
-  if (!match || match.status !== "VOTE_REPORTING" || !match.winnerTeam || match.ratingAppliedAt || match.players.length !== 8) return;
-
-  const completeVoters = new Set<string>();
-  for (const player of match.players) {
-    const votes = match.playerVotes.filter((vote) => vote.voterUserId === player.userId);
-    if (votes.some((vote) => vote.voteType === "STRONG") && votes.some((vote) => vote.voteType === "WEAK")) {
-      completeVoters.add(player.userId);
-    }
-  }
-  if (completeVoters.size !== 8) return;
-
-  try {
-    await applyRating(matchId);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 409) return;
-    throw error;
-  }
 }
