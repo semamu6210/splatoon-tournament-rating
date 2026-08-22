@@ -2,6 +2,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import Discord from "next-auth/providers/discord";
 
+import { syncDiscordProfileForUser } from "@/lib/auth-discord-sync";
 import { prisma } from "@/lib/prisma";
 
 const hasDiscordCredentials =
@@ -18,40 +19,13 @@ const providers: NextAuthConfig["providers"] = hasDiscordCredentials
   : [];
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-    trustHost: true,
-
+  trustHost: true,
   adapter: PrismaAdapter(prisma),
-
   providers,
   session: {
     strategy: "database",
   },
   callbacks: {
-    async signIn({ account, profile, user }) {
-      if (account?.provider === "discord" && profile && user.id) {
-        const discordProfile = profile as {
-          id?: string;
-          username?: string;
-          avatar?: string | null;
-        };
-
-        const avatarUrl =
-          discordProfile.id && discordProfile.avatar
-            ? `https://cdn.discordapp.com/avatars/${discordProfile.id}/${discordProfile.avatar}.png`
-            : user.image;
-
-        await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            discordId: discordProfile.id,
-            discordUsername: discordProfile.username,
-            avatarUrl,
-          },
-        });
-      }
-
-      return true;
-    },
     async session({ session, user }) {
       if (session.user) {
         const dbUser = await prisma.user.findUnique({
@@ -72,6 +46,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       return session;
+    },
+  },
+  events: {
+    async signIn({ account, profile, user }) {
+      if (account?.provider === "discord" && user.id) {
+        await syncDiscordProfileForUser(user.id, profile, user.image);
+      }
     },
   },
 });
