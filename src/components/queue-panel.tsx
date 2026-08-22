@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 type QueueStatus =
   | { status: "NOT_QUEUED" }
   | { status: "WAITING"; joinedAt: string; waitingSeconds: number }
-  | { status: "MATCHED"; matchId: string | null };
+  | { status: "MATCHED"; matchId: string };
 
 type QueuePanelProps = {
   phaseId: string;
@@ -83,12 +83,12 @@ export function QueuePanel({ phaseId, initialStatus }: QueuePanelProps) {
         </div>
       )}
       {status?.status === "MATCHED" && (
-        <div className="grid gap-2 rounded-md border border-emerald-400 bg-emerald-50 p-3">
-          <p className="text-lg font-bold text-emerald-800">マッチング成立</p>
-          <p className="text-sm text-emerald-700">通知音は将来ここで再生できる構造です。</p>
+        <div className="grid gap-3 rounded-md border-2 border-emerald-500 bg-emerald-50 p-4">
+          <p className="text-2xl font-bold text-emerald-900">マッチングが成立しました</p>
+          <p className="text-sm font-semibold text-emerald-800">試合画面を開いて、部屋コードとチームを確認してください。</p>
           {status.matchId ? (
             <Link className="rounded-md bg-zinc-950 px-4 py-2 text-center text-sm font-semibold text-white" href={`/matches/${status.matchId}`}>
-              試合を見る
+              試合へ進む
             </Link>
           ) : (
             <p className="text-sm text-zinc-600">試合IDを確認中です。</p>

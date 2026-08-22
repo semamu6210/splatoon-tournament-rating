@@ -8,6 +8,7 @@ import { MatchmakingRunButton } from "@/components/matchmaking-run-button";
 import { PhaseForm } from "@/components/phase-form";
 import { RatingConfigForm } from "@/components/rating-config-form";
 import { RankingTabs } from "@/components/ranking-tabs";
+import { TournamentDeleteButton } from "@/components/tournament-delete-button";
 import { TournamentForm } from "@/components/tournament-form";
 import { auth } from "@/auth";
 import { canManage } from "@/lib/permissions";
@@ -16,6 +17,7 @@ import { getTournamentOperationWarnings } from "@/lib/operations-monitor";
 import { getTournamentRankings } from "@/lib/ranking-service";
 import { getPhaseReadiness, getQualifierAdvancementPreview } from "@/lib/phase-service";
 import { serializeRatingConfig } from "@/lib/serializers";
+import { advancementModeLabel, matchStatusLabel, tournamentPhaseStatusLabel, tournamentPhaseTypeLabel, tournamentStatusLabel } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -162,7 +164,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
     return (
       <main className="px-5 py-8">
         <AuthControls />
-        <p className="mt-4 text-red-700">ADMINまたはOWNER権限が必要です。</p>
+        <p className="mt-4 text-red-700">管理者またはオーナー権限が必要です。</p>
       </main>
     );
   }
@@ -222,7 +224,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
           <Link className="text-sm text-zinc-600" href="/admin">← 管理</Link>
           <div>
             <h1 className="text-3xl font-bold">{tournament.name}</h1>
-            <p className="mt-2 text-sm text-zinc-600">{tournament.status}</p>
+            <p className="mt-2 text-sm text-zinc-600">{tournamentStatusLabel[tournament.status]}</p>
           </div>
           <AuthControls />
         </header>
@@ -233,17 +235,21 @@ export default async function AdminTournamentPage({ params }: PageProps) {
             initialEndsAt={tournament.endsAt?.toISOString() ?? null}
             initialName={tournament.name}
             initialRankingVisibility={tournament.rankingVisibility}
+            initialStagePoolEnabled={tournament.stagePoolEnabled}
+            initialStageNames={tournament.stages.map((stage) => stage.name)}
             initialStartsAt={tournament.startsAt?.toISOString() ?? null}
             mode="edit"
             tournamentId={tournament.id}
           />
         </section>
 
+        <TournamentDeleteButton tournamentId={tournament.id} tournamentName={tournament.name} />
+
         <section className="rounded-md border border-zinc-300 bg-white p-4">
           <h2 className="text-xl font-semibold">運営ダッシュボード</h2>
           <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-            <div>大会status: {tournament.status}</div>
-            <div>現在phase: {tournament.phases.find((phase) => phase.status === "ACTIVE")?.phaseType ?? "-"}</div>
+            <div>大会状態: {tournamentStatusLabel[tournament.status]}</div>
+            <div>現在フェーズ: {tournament.phases.find((phase) => phase.status === "ACTIVE")?.phaseType ? tournamentPhaseTypeLabel[tournament.phases.find((phase) => phase.status === "ACTIVE")!.phaseType] : "-"}</div>
             <div>参加者数: {tournament.participants.filter((participant) => participant.isActive).length}</div>
             <div>WAITING数: {waitingCount}</div>
             <div>未確定Match数: {unfinishedMatchCount}</div>
@@ -263,7 +269,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
 
         <section className="rounded-md border border-zinc-300 bg-white p-4">
           <h2 className="mb-4 text-xl font-semibold">フェーズ作成</h2>
-          <PhaseForm mode="create" tournamentId={tournament.id} />
+          <PhaseForm mode="create" stages={tournament.stages} tournamentId={tournament.id} />
         </section>
 
         <section className="rounded-md border border-zinc-300 bg-white p-4">
@@ -276,10 +282,10 @@ export default async function AdminTournamentPage({ params }: PageProps) {
               <div className="rounded-md border border-zinc-200 p-4" key={phase.id}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h3 className="font-semibold">{phase.phaseType}</h3>
+                    <h3 className="font-semibold">{tournamentPhaseTypeLabel[phase.phaseType]}</h3>
                     <p className="text-sm text-zinc-600">
-                      {phase.status} / 必要試合数 {phase.requiredMatchesPerPlayer}
-                      {phase.advancePlayerCount ? ` / 進出 ${phase.advancePlayerCount}位まで` : ""} / {phase.advancementMode}
+                      {tournamentPhaseStatusLabel[phase.status]} / 必要試合数 {phase.requiredMatchesPerPlayer}
+                      {phase.advancePlayerCount ? ` / 進出 ${phase.advancePlayerCount}位まで` : ""} / {advancementModeLabel[phase.advancementMode]}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -299,10 +305,12 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                         advancementMode: phase.advancementMode,
                         rule: phase.rule,
                         stageSelectionMode: phase.stageSelectionMode,
+                        defaultStageId: phase.defaultStageId,
                         sortOrder: phase.sortOrder,
                       }}
                       mode="edit"
                       phaseId={phase.id}
+                      stages={tournament.stages}
                     />
                   </div>
                 )}
@@ -312,7 +320,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                   <p className="mt-3 text-sm text-zinc-600">
                     完了状況: {readinessByPhaseId.get(phase.id)?.rows.filter((row) => row.complete).length ?? 0}/
                     {readinessByPhaseId.get(phase.id)?.rows.length ?? 0} / 未確定Match{" "}
-                    {readinessByPhaseId.get(phase.id)?.unfinishedMatches ?? 0} / WAITING{" "}
+                    {readinessByPhaseId.get(phase.id)?.unfinishedMatches ?? 0} / 待機中{" "}
                     {readinessByPhaseId.get(phase.id)?.waitingQueueEntries ?? 0}
                   </p>
                 )}
@@ -348,7 +356,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                   phaseId={phase.id}
                   phaseStatus={phase.status}
                 />
-                <p className="mt-3 text-sm font-semibold">WAITING人数: {phase.queueEntries.length}</p>
+                <p className="mt-3 text-sm font-semibold">待機中人数: {phase.queueEntries.length}</p>
                 <ul className="mt-2 grid gap-1 text-sm text-zinc-700">
                   {phase.queueEntries.map((entry) => (
                     <li key={entry.id}>
@@ -360,7 +368,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                 <ul className="mt-2 grid gap-1 text-sm text-zinc-700">
                   {phase.matches.map((match) => (
                     <li key={match.id}>
-                      <Link className="underline" href={`/matches/${match.id}`}>{match.id}</Link> / {match.status} / {match.players.length}人
+                      <Link className="underline" href={`/matches/${match.id}`}>{match.id}</Link> / {matchStatusLabel[match.status]} / 使用ステージ {match.stageName ?? "未設定"} / {match.players.length}人
                     </li>
                   ))}
                 </ul>
@@ -379,18 +387,10 @@ export default async function AdminTournamentPage({ params }: PageProps) {
         </section>
 
         <section className="rounded-md border border-zinc-300 bg-white p-4">
-          <h2 className="text-xl font-semibold">ステージ管理</h2>
+          <h2 className="text-xl font-semibold">使用ステージ</h2>
           <p className="mt-2 text-sm text-zinc-600">
-            登録済み: {tournament.stages.map((stage) => stage.name).join(" / ") || "なし"}
+            ステージプール: {tournament.stagePoolEnabled ? "有効" : "無効"} / 登録済み: {tournament.stages.map((stage) => stage.name).join(" / ") || "なし"}
           </p>
-          <div className="mt-3">
-            <ApiButton
-              body={{ names: ["ユノハナ大渓谷", "ゴンズイ地区", "ヤガラ市場", "マテガイ放水路"] }}
-              url={`/api/tournaments/${tournament.id}/stages`}
-            >
-              標準ステージ登録
-            </ApiButton>
-          </div>
         </section>
 
         <section className="rounded-md border border-zinc-300 bg-white p-4">
@@ -411,13 +411,13 @@ export default async function AdminTournamentPage({ params }: PageProps) {
             <table className="w-full min-w-96 text-left text-sm">
               <thead className="bg-zinc-100 text-zinc-600">
                 <tr>
-                  <th className="px-3 py-2">User</th>
+                  <th className="px-3 py-2">参加者</th>
                   <th className="px-3 py-2">XP</th>
-                  <th className="px-3 py-2">Block</th>
-                  <th className="px-3 py-2">Rating</th>
-                  <th className="px-3 py-2">Main</th>
-                  <th className="px-3 py-2">Final</th>
-                  <th className="px-3 py-2">Active</th>
+                  <th className="px-3 py-2">ブロック</th>
+                  <th className="px-3 py-2">現在レート</th>
+                  <th className="px-3 py-2">本戦</th>
+                  <th className="px-3 py-2">最終順位</th>
+                  <th className="px-3 py-2">参加状態</th>
                 </tr>
               </thead>
               <tbody>
@@ -434,9 +434,9 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                     <td className="px-3 py-2">{participant.areaXp}</td>
                     <td className="px-3 py-2">{participant.blockName ?? "-"}</td>
                     <td className="px-3 py-2">{participant.rating?.toString() ?? "未初期化"}</td>
-                    <td className="px-3 py-2">{participant.advancedToMainEvent ? "yes" : "no"}</td>
+                    <td className="px-3 py-2">{participant.advancedToMainEvent ? "対象" : "-"}</td>
                     <td className="px-3 py-2">{participant.finalRank ?? "-"}</td>
-                    <td className="px-3 py-2">{participant.isActive ? "yes" : "no"}</td>
+                    <td className="px-3 py-2">{participant.isActive ? "参加中" : "取消済み"}</td>
                   </tr>
                 ))}
               </tbody>

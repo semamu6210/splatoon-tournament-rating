@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AuthControls } from "@/components/auth-controls";
 import { auth } from "@/auth";
+import { tournamentStatusLabel } from "@/lib/labels";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
@@ -25,7 +26,7 @@ export default async function AdminPage() {
 
         {!allowed && (
           <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            ADMINまたはOWNER権限が必要です。権限変更はPrisma Studioなどで管理者が行ってください。
+            管理者またはオーナー権限が必要です。権限変更はPrisma Studioなどで管理者が行ってください。
           </div>
         )}
 
@@ -41,7 +42,7 @@ export default async function AdminPage() {
                 <Link className="rounded-md border border-zinc-300 bg-white p-4" href={`/admin/tournaments/${tournament.id}`} key={tournament.id}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-semibold">{tournament.name}</h2>
-                    <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold">{tournament.status}</span>
+                    <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold">{tournamentStatusLabel[tournament.status]}</span>
                   </div>
                 </Link>
               ))}

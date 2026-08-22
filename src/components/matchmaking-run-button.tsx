@@ -30,7 +30,7 @@ export function MatchmakingRunButton({ phaseId }: MatchmakingRunButtonProps) {
     }
 
     if (json?.matched) {
-      setMessage(`Match作成: ${json.matchId}`);
+      setMessage(`試合作成: ${json.matchId}`);
     } else {
       setMessage(json?.reason ?? "マッチング未成立");
     }

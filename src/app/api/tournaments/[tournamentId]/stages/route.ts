@@ -1,7 +1,7 @@
 import { requireAdmin } from "@/lib/authz";
 import { fail, ok, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { createTournamentStages } from "@/lib/stage-service";
+import { syncTournamentStages } from "@/lib/stage-service";
 
 type Context = {
   params: Promise<{ tournamentId: string }>;
@@ -22,10 +22,10 @@ export async function GET(_request: Request, context: Context) {
 
 export async function POST(request: Request, context: Context) {
   try {
-    await requireAdmin();
+    const user = await requireAdmin();
     const { tournamentId } = await context.params;
     const body = await readJson<{ names?: unknown }>(request);
-    const stages = await createTournamentStages(tournamentId, body.names);
+    const stages = await syncTournamentStages(tournamentId, body.names, user.id);
     return ok({ stages });
   } catch (error) {
     return fail(error);

@@ -17,7 +17,7 @@ export default async function NewTournamentPage() {
           <h1 className="text-3xl font-bold">大会作成</h1>
           <AuthControls />
         </header>
-        {allowed ? <TournamentForm mode="create" /> : <p className="text-red-700">ADMINまたはOWNER権限が必要です。</p>}
+        {allowed ? <TournamentForm mode="create" /> : <p className="text-red-700">管理者またはオーナー権限が必要です。</p>}
       </section>
     </main>
   );

@@ -1,17 +1,19 @@
 import { Prisma, UserRole } from "@prisma/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { canManage } from "@/lib/permissions";
-import { prisma } from "@/lib/prisma";
-import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
+import { joinQueue, runMatchmaking } from "@/lib/matchmaking/service";
 import {
   createRatingConfigVersion,
   createTournament,
+  deleteTournament,
   joinTournament,
   openRegistration,
   startTournament,
   updateTournament,
 } from "@/lib/tournament-service";
+import { canManage } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
 
 const createdUserIds: string[] = [];
 const createdTournamentIds: string[] = [];
@@ -207,5 +209,147 @@ describe("tournament service", () => {
     await expect(joinTournament(playerA.id, tournament.id, { areaXp: 2500 })).rejects.toThrow(
       "Tournament registration is not open.",
     );
+  });
+
+  it("allows ADMIN to delete a tournament and cascades tournament data without deleting users or other tournaments", async () => {
+    const admin = await createUser(UserRole.ADMIN);
+    const otherTournament = await createDraftTournament(admin.id, `other-${crypto.randomUUID()}`);
+    const tournament = await createTournament(admin.id, {
+      name: `delete-${crypto.randomUUID()}`,
+      startsAt: null,
+      endsAt: null,
+      stagePoolEnabled: true,
+      stageNames: ["ユノハナ大渓谷", "ゴンズイ地区"],
+    });
+    createdTournamentIds.push(tournament.id);
+    await createRatingConfigVersion(admin.id, tournament.id, validRatingConfig());
+    await openRegistration(admin.id, tournament.id);
+
+    const players = [];
+    for (let index = 0; index < 8; index += 1) {
+      const player = await createUser(UserRole.PLAYER);
+      players.push(player);
+      await joinTournament(player.id, tournament.id, { areaXp: 2400 + index });
+    }
+    await startTournament(admin.id, tournament.id);
+    const phase = await prisma.tournamentPhase.create({
+      data: { tournamentId: tournament.id, phaseType: "QUALIFIER", status: "ACTIVE", requiredMatchesPerPlayer: 10, sortOrder: 1 },
+    });
+    const participant = await prisma.tournamentParticipant.findFirstOrThrow({ where: { tournamentId: tournament.id } });
+    await prisma.tournamentPhaseParticipant.create({ data: { phaseId: phase.id, tournamentParticipantId: participant.id } });
+    const block = await prisma.tournamentBlock.create({ data: { phaseId: phase.id, name: "ブロックA", sortOrder: 1 } });
+    await prisma.tournamentBlockParticipant.create({ data: { blockId: block.id, phaseId: phase.id, tournamentParticipantId: participant.id } });
+
+    for (const player of players) {
+      await joinQueue(player.id, phase.id);
+    }
+    const result = await runMatchmaking(phase.id);
+    expect(result.matched).toBe(true);
+    if (!result.matched) throw new Error("Expected match");
+
+    const match = await prisma.match.findUniqueOrThrow({ where: { id: result.matchId }, include: { players: true } });
+    await prisma.matchResultReport.create({ data: { matchId: match.id, userId: match.players[0].userId, reportedWinnerTeam: "A" } });
+    await prisma.playerVote.create({
+      data: {
+        matchId: match.id,
+        voterUserId: match.players[0].userId,
+        targetUserId: match.players.find((player) => player.team !== match.players[0].team)!.userId,
+        voteType: "STRONG",
+      },
+    });
+    const config = await prisma.tournamentRatingConfig.findFirstOrThrow({ where: { tournamentId: tournament.id } });
+    await prisma.ratingHistory.create({
+      data: {
+        tournamentId: tournament.id,
+        matchId: match.id,
+        userId: match.players[0].userId,
+        ratingConfigIdUsed: config.id,
+        ratingConfigVersionUsed: config.version,
+        ratingBefore: "1200",
+        strongVotesReceived: 1,
+        weakVotesReceived: 0,
+        strongVotePointsUsed: "10",
+        weakVotePointsUsed: "5",
+        winBonusUsed: "10",
+        losingStreakPenaltyUsed: "0",
+        votePoints: "10",
+        baseDelta: "20",
+        areaXpUsed: 2400,
+        xpMultiplierUsed: "1",
+        finalDelta: "20",
+        ratingAfter: "1220",
+      },
+    });
+
+    await deleteTournament(admin, tournament.id, { name: tournament.name });
+
+    expect(await prisma.tournament.findUnique({ where: { id: tournament.id } })).toBeNull();
+    expect(await prisma.tournamentStage.count({ where: { tournamentId: tournament.id } })).toBe(0);
+    expect(await prisma.tournamentPhase.count({ where: { tournamentId: tournament.id } })).toBe(0);
+    expect(await prisma.tournamentParticipant.count({ where: { tournamentId: tournament.id } })).toBe(0);
+    expect(await prisma.tournamentRatingConfig.count({ where: { tournamentId: tournament.id } })).toBe(0);
+    expect(await prisma.queueEntry.count({ where: { tournamentId: tournament.id } })).toBe(0);
+    expect(await prisma.match.count({ where: { tournamentId: tournament.id } })).toBe(0);
+    expect(await prisma.matchPlayer.count({ where: { matchId: match.id } })).toBe(0);
+    expect(await prisma.matchResultReport.count({ where: { matchId: match.id } })).toBe(0);
+    expect(await prisma.playerVote.count({ where: { matchId: match.id } })).toBe(0);
+    expect(await prisma.ratingHistory.count({ where: { tournamentId: tournament.id } })).toBe(0);
+    expect(await prisma.user.count({ where: { id: { in: players.map((player) => player.id) } } })).toBe(8);
+    expect(await prisma.tournament.findUnique({ where: { id: otherTournament.id } })).toBeTruthy();
+    expect(await prisma.adminActionLog.findFirst({ where: { action: "TOURNAMENT_DELETED", targetId: tournament.id } })).toBeTruthy();
+  });
+
+  it("allows the OWNER who created the tournament to delete it", async () => {
+    const owner = await createUser(UserRole.OWNER);
+    const tournament = await createDraftTournament(owner.id, `owner-delete-${crypto.randomUUID()}`);
+
+    await deleteTournament(owner, tournament.id, { name: tournament.name });
+
+    expect(await prisma.tournament.findUnique({ where: { id: tournament.id } })).toBeNull();
+  });
+
+  it("rejects OWNER deleting a tournament created by someone else", async () => {
+    const admin = await createUser(UserRole.ADMIN);
+    const owner = await createUser(UserRole.OWNER);
+    const tournament = await createDraftTournament(admin.id, `owner-idor-${crypto.randomUUID()}`);
+
+    await expect(deleteTournament(owner, tournament.id, { name: tournament.name })).rejects.toThrow("大会を削除する権限がありません。");
+  });
+
+  it("rejects PLAYER deletion with 403", async () => {
+    const admin = await createUser(UserRole.ADMIN);
+    const player = await createUser(UserRole.PLAYER);
+    const tournament = await createDraftTournament(admin.id, `player-delete-${crypto.randomUUID()}`);
+
+    await expect(deleteTournament(player, tournament.id, { name: tournament.name })).rejects.toThrow("大会を削除する権限がありません。");
+  });
+
+  it("rejects deleting a missing tournament with 404", async () => {
+    const admin = await createUser(UserRole.ADMIN);
+
+    await expect(deleteTournament(admin, "missing-tournament-id", { name: "missing" })).rejects.toThrow("大会が見つかりません。");
+  });
+
+  it("rejects deletion when tournament name confirmation does not match", async () => {
+    const admin = await createUser(UserRole.ADMIN);
+    const tournament = await createDraftTournament(admin.id, `name-mismatch-${crypto.randomUUID()}`);
+
+    await expect(deleteTournament(admin, tournament.id, { name: `${tournament.name}x` })).rejects.toThrow("大会名が一致しません。");
+    expect(await prisma.tournament.findUnique({ where: { id: tournament.id } })).toBeTruthy();
+  });
+
+  it("rejects unauthenticated DELETE requests", async () => {
+    vi.doMock("@/auth", () => ({ auth: async () => null }));
+    const { DELETE: deleteTournamentRoute } = await import("@/app/api/tournaments/[tournamentId]/route");
+    const response = await deleteTournamentRoute(
+      new Request("http://localhost/api/tournaments/missing", {
+        method: "DELETE",
+        body: JSON.stringify({ name: "missing" }),
+      }),
+      { params: Promise.resolve({ tournamentId: "missing" }) },
+    );
+
+    expect(response.status).toBe(401);
+    vi.doUnmock("@/auth");
   });
 });

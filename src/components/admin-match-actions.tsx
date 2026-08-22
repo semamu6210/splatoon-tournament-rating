@@ -3,11 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-type AdminMatchActionsProps = { matchId: string };
+type AdminMatchActionsProps = {
+  matchId: string;
+  stages?: Array<{ id: string; name: string }>;
+  currentStageId?: string | null;
+};
 
-export function AdminMatchActions({ matchId }: AdminMatchActionsProps) {
+export function AdminMatchActions({ matchId, stages = [], currentStageId = null }: AdminMatchActionsProps) {
   const router = useRouter();
   const [winner, setWinner] = useState<"A" | "B">("A");
+  const [stageId, setStageId] = useState(currentStageId ?? "");
   const [reason, setReason] = useState("");
   const [closeReason, setCloseReason] = useState("");
   const [cancelReason, setCancelReason] = useState("");
@@ -28,6 +33,21 @@ export function AdminMatchActions({ matchId }: AdminMatchActionsProps) {
     router.refresh();
   }
 
+  async function patch(url: string, body: Record<string, unknown>) {
+    const response = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await response.json().catch(() => null)) as { error?: string } | null;
+    if (!response.ok) {
+      setMessage(json?.error ?? "操作に失敗しました。");
+      return;
+    }
+    setMessage("保存しました。");
+    router.refresh();
+  }
+
   return (
     <div className="grid gap-3 rounded-md border border-zinc-300 bg-white p-4">
       <h2 className="text-lg font-semibold">ADMIN操作</h2>
@@ -42,10 +62,26 @@ export function AdminMatchActions({ matchId }: AdminMatchActionsProps) {
           レート確定
         </button>
       </div>
+      <div className="grid gap-2 border-t border-zinc-200 pt-3">
+        <label className="grid gap-1 text-sm">
+          使用ステージ
+          <select className="rounded-md border border-zinc-300 px-3 py-2" onChange={(e) => setStageId(e.target.value)} value={stageId}>
+            <option value="">未設定</option>
+            {stages.map((stage) => (
+              <option key={stage.id} value={stage.id}>
+                {stage.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold" disabled={!stageId} onClick={() => void patch(`/api/admin/matches/${matchId}/stage`, { stageId })} type="button">
+          ステージを保存
+        </button>
+      </div>
       <div className="grid gap-2">
         <select className="rounded-md border border-zinc-300 px-3 py-2" onChange={(e) => setWinner(e.target.value as "A" | "B")} value={winner}>
-          <option value="A">Team A 勝利</option>
-          <option value="B">Team B 勝利</option>
+          <option value="A">チームA 勝利</option>
+          <option value="B">チームB 勝利</option>
         </select>
         <input className="rounded-md border border-zinc-300 px-3 py-2" onChange={(e) => setReason(e.target.value)} placeholder="強制確定理由" value={reason} />
         <button className="rounded-md bg-zinc-950 px-3 py-2 text-sm font-semibold text-white" onClick={() => window.confirm("勝敗を強制確定しますか？") && void post(`/api/admin/matches/${matchId}/force-result`, { winnerTeam: winner, reason })} type="button">

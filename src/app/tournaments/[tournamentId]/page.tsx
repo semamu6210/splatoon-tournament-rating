@@ -7,6 +7,7 @@ import { QueuePanel } from "@/components/queue-panel";
 import { RankingTabs } from "@/components/ranking-tabs";
 import { auth } from "@/auth";
 import { formatRating } from "@/lib/format";
+import { tournamentPhaseStatusLabel, tournamentPhaseTypeLabel, tournamentStatusLabel } from "@/lib/labels";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { filterTournamentRankingsForViewer, getTournamentRankings } from "@/lib/ranking-service";
@@ -108,7 +109,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           joinedAt: queueEntry.joinedAt.toISOString(),
           waitingSeconds: 0,
         }
-      : queueEntry?.status === "MATCHED"
+      : queueEntry?.status === "MATCHED" && queueEntry.matchId
         ? { status: "MATCHED" as const, matchId: queueEntry.matchId }
         : { status: "NOT_QUEUED" as const };
   const myVoteStats =
@@ -154,7 +155,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           <Link className="text-sm text-zinc-600" href="/tournaments">← 大会一覧</Link>
           <div>
             <h1 className="text-3xl font-bold">{tournament.name}</h1>
-            <p className="mt-2 text-sm text-zinc-600">{tournament.status}</p>
+            <p className="mt-2 text-sm text-zinc-600">{tournamentStatusLabel[tournament.status]}</p>
           </div>
           <Link className="w-fit rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white" href={`/tournaments/${tournament.id}/ranking`}>
             ランキング
@@ -176,7 +177,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           <ul className="mt-3 grid gap-2 text-sm">
             {tournament.phases.map((phase) => (
               <li className="border-b border-zinc-100 pb-2" key={phase.id}>
-                {phase.phaseType} / {phase.status} / 必要試合数 {phase.requiredMatchesPerPlayer}
+                {tournamentPhaseTypeLabel[phase.phaseType]} / {tournamentPhaseStatusLabel[phase.status]} / 必要試合数 {phase.requiredMatchesPerPlayer}
                 {phase.advancePlayerCount ? ` / 進出 ${phase.advancePlayerCount}位まで` : ""}
               </li>
             ))}
@@ -190,7 +191,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
             {phaseProgress.map((item) => (
               <div key={item.phase.id}>
                 <div className="flex justify-between">
-                  <span>{item.phase.phaseType}</span>
+                  <span>{tournamentPhaseTypeLabel[item.phase.phaseType]}</span>
                   <span>{item.completedSlots}/{item.totalSlots} ({item.percentage}%)</span>
                 </div>
                 <div className="mt-1 h-3 rounded bg-zinc-200">
@@ -210,8 +211,8 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           {!session?.user && <p className="mt-3 text-sm text-zinc-600">参加登録にはログインが必要です。</p>}
           {session?.user && myParticipant && (
             <div className="mt-3 grid gap-2 text-sm">
-              <p>登録済み / areaXP: {myParticipant.areaXp}</p>
-              <p>rating: {myParticipant.rating ? formatRating(myParticipant.rating) : "大会開始前"}</p>
+              <p>登録済み / XP: {myParticipant.areaXp}</p>
+              <p>現在レート: {myParticipant.rating ? formatRating(myParticipant.rating) : "大会開始前"}</p>
               {myRanking?.currentPhase && (
                 <p>
                   現在フェーズ試合数: {myRanking.currentPhase.confirmedMatchesInPhase}/
@@ -226,8 +227,8 @@ export default async function TournamentDetailPage({ params }: PageProps) {
                 </p>
               )}
               <p>本戦進出状態: {myParticipant.advancedToMainEvent ? "本戦対象" : "未確定/対象外"}</p>
-              <p>大会累計 STRONG: {voteCount(myVoteStats, "STRONG")} / WEAK: {voteCount(myVoteStats, "WEAK")}</p>
-              <p>現在フェーズ STRONG: {voteCount(myPhaseVoteStats, "STRONG")} / WEAK: {voteCount(myPhaseVoteStats, "WEAK")}</p>
+              <p>大会累計 強い票: {voteCount(myVoteStats, "STRONG")} / 弱い票: {voteCount(myVoteStats, "WEAK")}</p>
+              <p>現在フェーズ 強い票: {voteCount(myPhaseVoteStats, "STRONG")} / 弱い票: {voteCount(myPhaseVoteStats, "WEAK")}</p>
               {tournament.status === "REGISTRATION" && (
                 <ApiButton url={`/api/tournaments/${tournament.id}/leave`}>参加取消</ApiButton>
               )}
@@ -258,7 +259,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
                     ▼ {participant.losingStreak}連敗
                   </button>
                 ) : null}{" "}
-                / rating {formatRating(participant.rating)} / {participant.wins}-{participant.losses} / 試合 {participant.matchesPlayed}
+                / 現在レート {formatRating(participant.rating)} / {participant.wins}勝{participant.losses}敗 / 試合 {participant.matchesPlayed}
               </li>
             ))}
           </ul>

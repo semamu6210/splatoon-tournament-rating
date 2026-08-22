@@ -85,7 +85,7 @@ export function RatingConfigForm({ tournamentId, current }: RatingConfigFormProp
     <form className="grid gap-5" onSubmit={onSubmit}>
       <div className="rounded-md border border-zinc-300 bg-white p-4">
         <p className="text-sm font-semibold text-zinc-600">
-          Current Rating Config: {current ? `Version ${current.version}` : "未設定"}
+          現在のレート設定: {current ? `バージョン ${current.version}` : "未設定"}
         </p>
       </div>
 

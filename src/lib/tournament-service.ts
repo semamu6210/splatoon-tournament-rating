@@ -1,5 +1,6 @@
 import { Prisma, TournamentStatus, type RankingVisibility } from "@prisma/client";
 
+import type { AuthenticatedUser } from "@/lib/authz";
 import { ApiError } from "@/lib/http";
 import {
   configSnapshot,
@@ -8,6 +9,7 @@ import {
   validateCompleteRatingConfig,
 } from "@/lib/rating-config";
 import { prisma } from "@/lib/prisma";
+import { normalizeStageNames, normalizeStagePoolEnabled, syncTournamentStagePool } from "@/lib/stage-service";
 import { areaXpValue, optionalDate, requiredString } from "@/lib/validation";
 
 export type TournamentInput = {
@@ -15,11 +17,16 @@ export type TournamentInput = {
   startsAt?: unknown;
   endsAt?: unknown;
   rankingVisibility?: unknown;
+  stagePoolEnabled?: unknown;
+  stageNames?: unknown;
 };
 
 export function normalizeTournamentInput(input: TournamentInput) {
   const startsAt = optionalDate(input.startsAt, "startsAt");
   const endsAt = optionalDate(input.endsAt, "endsAt");
+  const explicitStagePoolEnabled = normalizeStagePoolEnabled(input.stagePoolEnabled);
+  const stagePoolEnabled = explicitStagePoolEnabled ?? (input.stageNames === undefined ? undefined : true);
+  const stageNames = stagePoolEnabled ? normalizeStageNames(input.stageNames) : undefined;
 
   if (startsAt && endsAt && startsAt >= endsAt) {
     throw new ApiError(400, "endsAt must be after startsAt.");
@@ -29,6 +36,8 @@ export function normalizeTournamentInput(input: TournamentInput) {
     name: requiredString(input.name, "name"),
     startsAt,
     endsAt,
+    stagePoolEnabled,
+    stageNames,
     rankingVisibility: (
       input.rankingVisibility === "OWN_BLOCK_ONLY" ||
       input.rankingVisibility === "OWN_AND_OTHER_BLOCKS" ||
@@ -41,15 +50,22 @@ export function normalizeTournamentInput(input: TournamentInput) {
 
 export async function createTournament(adminUserId: string, input: TournamentInput) {
   const data = normalizeTournamentInput(input);
+  const { stageNames, stagePoolEnabled, ...tournamentData } = data;
 
   return prisma.$transaction(async (tx) => {
     const tournament = await tx.tournament.create({
       data: {
-        ...data,
+        ...tournamentData,
+        stagePoolEnabled: Boolean(stagePoolEnabled),
         createdByUserId: adminUserId,
         status: TournamentStatus.DRAFT,
       },
     });
+    if (stageNames) {
+      await tx.tournamentStage.createMany({
+        data: stageNames.map((name, index) => ({ tournamentId: tournament.id, name, sortOrder: index + 1 })),
+      });
+    }
 
     await tx.adminActionLog.create({
       data: {
@@ -57,7 +73,7 @@ export async function createTournament(adminUserId: string, input: TournamentInp
         action: "TOURNAMENT_CREATED",
         targetType: "Tournament",
         targetId: tournament.id,
-        metadata: { after: data },
+        metadata: { after: { ...tournamentData, stagePoolEnabled: Boolean(stagePoolEnabled), stageNames: stageNames ?? [] } },
       },
     });
 
@@ -67,9 +83,11 @@ export async function createTournament(adminUserId: string, input: TournamentInp
 
 export async function updateTournament(adminUserId: string, tournamentId: string, input: TournamentInput) {
   const data = normalizeTournamentInput(input);
+  const { stageNames, stagePoolEnabled, ...tournamentData } = data;
 
   return prisma.$transaction(async (tx) => {
     const before = await tx.tournament.findUnique({ where: { id: tournamentId } });
+    const stagesBefore = await tx.tournamentStage.findMany({ where: { tournamentId, isActive: true }, orderBy: { sortOrder: "asc" } });
 
     if (!before) {
       throw new ApiError(404, "Tournament not found.");
@@ -79,10 +97,16 @@ export async function updateTournament(adminUserId: string, tournamentId: string
       throw new ApiError(400, "Only DRAFT or REGISTRATION tournaments can be edited.");
     }
 
-    const after = await tx.tournament.update({
+    await tx.tournament.update({
       where: { id: tournamentId },
-      data,
+      data: tournamentData,
     });
+    let stagesAfter = stagesBefore;
+    if (stagePoolEnabled !== undefined) {
+      const result = await syncTournamentStagePool(tx, tournamentId, { stagePoolEnabled, stageNames });
+      stagesAfter = result.after;
+    }
+    const after = await tx.tournament.findUniqueOrThrow({ where: { id: tournamentId } });
 
     await tx.adminActionLog.create({
       data: {
@@ -95,17 +119,96 @@ export async function updateTournament(adminUserId: string, tournamentId: string
             name: before.name,
             startsAt: before.startsAt?.toISOString() ?? null,
             endsAt: before.endsAt?.toISOString() ?? null,
+            stageNames: stagesBefore.map((stage) => stage.name),
           },
           after: {
             name: after.name,
             startsAt: after.startsAt?.toISOString() ?? null,
             endsAt: after.endsAt?.toISOString() ?? null,
+            stagePoolEnabled: stagePoolEnabled ?? before.stagePoolEnabled,
+            stageNames: stagesAfter.map((stage) => stage.name),
           },
         },
       },
     });
 
     return after;
+  });
+}
+
+export async function deleteTournament(user: AuthenticatedUser, tournamentId: string, input: { name?: unknown }) {
+  const confirmationName = typeof input.name === "string" ? input.name : "";
+
+  return prisma.$transaction(async (tx) => {
+    const tournament = await tx.tournament.findUnique({
+      where: { id: tournamentId },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        createdByUserId: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: {
+          select: {
+            phases: true,
+            participants: true,
+            ratingConfigs: true,
+            queueEntries: true,
+            matches: true,
+            ratingHistories: true,
+            stages: true,
+          },
+        },
+      },
+    });
+
+    if (!tournament) throw new ApiError(404, "大会が見つかりません。");
+
+    const allowed = user.role === "ADMIN" || (user.role === "OWNER" && tournament.createdByUserId === user.id);
+    if (!allowed) throw new ApiError(403, "大会を削除する権限がありません。");
+
+    if (confirmationName !== tournament.name) {
+      throw new ApiError(400, "大会名が一致しません。");
+    }
+
+    const phaseParticipants = await tx.tournamentPhaseParticipant.count({ where: { phase: { tournamentId } } });
+    const blocks = await tx.tournamentBlock.count({ where: { phase: { tournamentId } } });
+    const blockParticipants = await tx.tournamentBlockParticipant.count({ where: { phase: { tournamentId } } });
+    const matchPlayers = await tx.matchPlayer.count({ where: { match: { tournamentId } } });
+    const resultReports = await tx.matchResultReport.count({ where: { match: { tournamentId } } });
+    const playerVotes = await tx.playerVote.count({ where: { match: { tournamentId } } });
+
+    await tx.adminActionLog.create({
+      data: {
+        adminUserId: user.id,
+        action: "TOURNAMENT_DELETED",
+        targetType: "Tournament",
+        targetId: tournamentId,
+        metadata: {
+          deletedTournament: {
+            id: tournament.id,
+            name: tournament.name,
+            status: tournament.status,
+            createdByUserId: tournament.createdByUserId,
+            createdAt: tournament.createdAt.toISOString(),
+            updatedAt: tournament.updatedAt.toISOString(),
+          },
+          deletedCounts: {
+            ...tournament._count,
+            phaseParticipants,
+            blocks,
+            blockParticipants,
+            matchPlayers,
+            resultReports,
+            playerVotes,
+          },
+        },
+      },
+    });
+
+    await tx.tournament.delete({ where: { id: tournamentId } });
+    return { deleted: true as const, tournamentId, name: tournament.name };
   });
 }
 
@@ -304,6 +407,10 @@ export async function startTournament(adminUserId: string, tournamentId: string)
 
       if (tournament.status !== TournamentStatus.REGISTRATION) {
         throw new ApiError(400, "Only REGISTRATION tournaments can be started.");
+      }
+      if (tournament.stagePoolEnabled) {
+        const stageCount = await tx.tournamentStage.count({ where: { tournamentId, isActive: true } });
+        if (stageCount === 0) throw new ApiError(400, "使用ステージを1つ以上選択してください。");
       }
 
       const activeConfigs = await tx.tournamentRatingConfig.findMany({

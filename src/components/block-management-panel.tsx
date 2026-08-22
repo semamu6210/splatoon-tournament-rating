@@ -47,7 +47,7 @@ export function BlockManagementPanel({ phaseId, phaseStatus, blocks, participant
   function createBlocks() {
     const count = Number(blockCount);
     const blocksPayload = Array.from({ length: Number.isInteger(count) && count > 0 ? count : 4 }, (_, index) => ({
-      name: `Block ${String.fromCharCode(65 + index)}`,
+      name: `ブロック${String.fromCharCode(65 + index)}`,
       advancePlayerCount: 0,
     }));
     void request(`/api/phases/${phaseId}/blocks`, "POST", { blocks: blocksPayload });

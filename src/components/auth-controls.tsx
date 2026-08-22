@@ -1,4 +1,5 @@
 import { auth, signIn, signOut } from "@/auth";
+import { userRoleLabel } from "@/lib/labels";
 
 export async function AuthControls() {
   const session = await auth();
@@ -36,9 +37,9 @@ export async function AuthControls() {
     <div className="flex flex-wrap items-center gap-3">
       <div className="text-sm text-zinc-700">
         <span className="font-semibold text-zinc-950">
-          {session.user.discordUsername ?? session.user.name ?? "Logged in"}
+          {session.user.discordUsername ?? session.user.name ?? "ログイン中"}
         </span>{" "}
-        / {session.user.role}
+        / {userRoleLabel[session.user.role]}
       </div>
       <form
         action={async () => {

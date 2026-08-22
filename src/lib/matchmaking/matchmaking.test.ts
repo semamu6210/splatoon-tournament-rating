@@ -5,7 +5,7 @@ import { calculateMatchingRating } from "@/lib/matchmaking/rating";
 import { selectEightPlayers } from "@/lib/matchmaking/selection";
 import { splitIntoBalancedTeams } from "@/lib/matchmaking/team";
 import type { WaitingPlayer } from "@/lib/matchmaking/types";
-import { joinQueue, joinQueueAndRunMatchmaking, leaveQueue, runMatchmaking } from "@/lib/matchmaking/service";
+import { getQueueStatus, joinQueue, joinQueueAndRunMatchmaking, leaveQueue, runMatchmaking } from "@/lib/matchmaking/service";
 import { prisma } from "@/lib/prisma";
 import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
 import {
@@ -330,6 +330,37 @@ describe("queue and matchmaking service", () => {
     expect(match?.players.every((player) => player.ratingAfter === null)).toBe(true);
     expect(match?.queueEntries).toHaveLength(8);
     expect(match?.queueEntries.every((entry) => entry.status === "MATCHED")).toBe(true);
+    expect(match?.privateRoomCode).toMatch(/^[A-Z]{3}$/);
+    expect(match?.roomHostUserId).toBeTruthy();
+    expect(match?.players.some((player) => player.userId === match.roomHostUserId)).toBe(true);
+
+    const queueStatus = await getQueueStatus(players[0].id, phase.id);
+    expect(queueStatus).toEqual({ status: "MATCHED", matchId: match?.id });
+
+    const reloaded = await prisma.match.findUniqueOrThrow({ where: { id: result.matchId } });
+    expect(reloaded.privateRoomCode).toBe(match?.privateRoomCode);
+    expect(reloaded.roomHostUserId).toBe(match?.roomHostUserId);
+  });
+
+  it("does not reuse private room codes across active matches", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(16);
+    for (const player of players.slice(0, 8)) {
+      await joinQueue(player.id, phase.id);
+    }
+    const first = await runMatchmaking(phase.id);
+    expect(first.matched).toBe(true);
+    if (!first.matched) throw new Error("Expected match");
+
+    for (const player of players.slice(8, 16)) {
+      await joinQueue(player.id, phase.id);
+    }
+    const second = await runMatchmaking(phase.id);
+    expect(second.matched).toBe(true);
+    if (!second.matched) throw new Error("Expected match");
+
+    const matches = await prisma.match.findMany({ where: { id: { in: [first.matchId, second.matchId] } } });
+    expect(matches).toHaveLength(2);
+    expect(new Set(matches.map((match) => match.privateRoomCode))).toHaveLength(2);
   });
 
   it("does not assign the same waiting players to multiple matches during concurrent runs", async () => {

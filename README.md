@@ -93,6 +93,24 @@ npm run dev
 
 ブラウザで `http://localhost:3000` を開きます。
 
+## ステージ画像
+
+Match画面では、ステージ名に対応する画像パスを `src/lib/stages.ts` の `STAGE_DEFINITIONS` で明示的に管理します。画像ファイル名をステージ名から推測する実装にはしていません。
+
+画像素材は以下へ配置してください。
+
+```text
+public/stages/
+```
+
+例:
+
+```ts
+{ nameJa: "ユノハナ大渓谷", imagePath: "/stages/yunohana.webp" }
+```
+
+新しいステージ画像を追加または差し替える場合は、`public/stages/` に画像を置き、`src/lib/stages.ts` の `nameJa` と `imagePath` の対応を更新してください。画像は `.webp` を推奨しますが、Next.jsが配信できる静的画像であれば利用できます。
+
 ## 開発Seed
 
 32人大会、ADMIN、XP分散、レート設定、予選/本戦フェーズ、複数ブロックを作る開発用seedがあります。

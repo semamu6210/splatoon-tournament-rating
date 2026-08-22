@@ -12,9 +12,9 @@ export default async function HomePage() {
     <main className="min-h-screen px-5 py-8 sm:px-8">
       <section className="mx-auto flex max-w-3xl flex-col gap-6">
         <div className="border-b border-zinc-300 pb-5">
-          <p className="text-sm font-semibold text-zinc-600">Tournament operations</p>
+          <p className="text-sm font-semibold text-zinc-600">大会運営</p>
           <h1 className="mt-2 text-3xl font-bold text-zinc-950 sm:text-4xl">
-            Splatoon Tournament Rating System
+            Splatoon 大会レーティングシステム
           </h1>
           <p className="mt-3 text-base text-zinc-700">
             大会作成、参加登録、フェーズ進行、マッチング、投票、レート計算、
@@ -26,14 +26,14 @@ export default async function HomePage() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-md border border-zinc-300 bg-white p-4">
-            <h2 className="text-sm font-semibold text-zinc-500">App</h2>
+            <h2 className="text-sm font-semibold text-zinc-500">アプリ</h2>
             <p className="mt-2 text-lg font-semibold text-zinc-950">
-              Next.js is running
+              起動中
             </p>
           </div>
 
           <div className="rounded-md border border-zinc-300 bg-white p-4">
-            <h2 className="text-sm font-semibold text-zinc-500">Database</h2>
+            <h2 className="text-sm font-semibold text-zinc-500">データベース</h2>
             <p
               className={
                 db.ok
@@ -41,7 +41,7 @@ export default async function HomePage() {
                   : "mt-2 text-lg font-semibold text-red-700"
               }
             >
-              {db.ok ? "Connected" : "Not connected"}
+              {db.ok ? "接続済み" : "未接続"}
             </p>
             {!db.ok && (
               <p className="mt-2 break-words text-sm text-zinc-600">

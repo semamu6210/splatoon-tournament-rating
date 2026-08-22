@@ -1,4 +1,5 @@
 import { Prisma, QueueStatus, TournamentPhaseStatus, TournamentStatus } from "@prisma/client";
+import { randomInt } from "node:crypto";
 
 import { ApiError } from "@/lib/http";
 import { selectEightPlayers } from "@/lib/matchmaking/selection";
@@ -6,8 +7,11 @@ import { splitIntoBalancedTeams } from "@/lib/matchmaking/team";
 import type { MatchmakingPlayer, WaitingPlayer } from "@/lib/matchmaking/types";
 import { prisma } from "@/lib/prisma";
 import { validateCompleteRatingConfig } from "@/lib/rating-config";
+import { requireUsableTournamentStage } from "@/lib/stage-service";
 
 type Tx = Prisma.TransactionClient;
+const ACTIVE_MATCH_STATUSES = ["CREATED", "PLAYING", "RESULT_REPORTING", "VOTE_REPORTING"] as const;
+const ROOM_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 async function ensurePhaseForQueue(phaseId: string) {
   const phase = await prisma.tournamentPhase.findUnique({
@@ -163,9 +167,23 @@ export async function getQueueStatus(userId: string, phaseId: string) {
     };
   }
 
+  const fallbackMatch = entry.matchId
+    ? null
+    : await prisma.match.findFirst({
+        where: {
+          phaseId,
+          players: { some: { userId } },
+          status: { in: [...ACTIVE_MATCH_STATUSES] },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+  const matchId = entry.matchId ?? fallbackMatch?.id;
+  if (!matchId) throw new ApiError(409, "マッチング済みですが試合IDを確認できません。");
+
   return {
     status: "MATCHED" as const,
-    matchId: entry.matchId,
+    matchId,
   };
 }
 
@@ -269,12 +287,45 @@ async function nextMatchNumber(tx: Tx, phaseId: string) {
   return (latest?.matchNumber ?? 0) + 1;
 }
 
+function generatePrivateRoomCode() {
+  let code = "";
+  for (let index = 0; index < 3; index += 1) {
+    code += ROOM_CODE_ALPHABET[randomInt(ROOM_CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+async function generateAvailablePrivateRoomCode(tx: Tx) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const code = generatePrivateRoomCode();
+    const existing = await tx.match.findFirst({
+      where: { privateRoomCode: code, status: { in: [...ACTIVE_MATCH_STATUSES] } },
+      select: { id: true },
+    });
+    if (!existing) return code;
+  }
+  throw new ApiError(500, "プライベートマッチ用コードを生成できませんでした。");
+}
+
+async function selectRoomHostUserId(tx: Tx, players: MatchmakingPlayer[]) {
+  const userIds = players.map((player) => player.userId);
+  const hostCounts = await tx.match.groupBy({
+    by: ["roomHostUserId"],
+    where: { roomHostUserId: { in: userIds } },
+    _count: { roomHostUserId: true },
+  });
+  const countByUserId = new Map(hostCounts.map((row) => [row.roomHostUserId, row._count.roomHostUserId]));
+  const minCount = Math.min(...userIds.map((userId) => countByUserId.get(userId) ?? 0));
+  const candidates = userIds.filter((userId) => (countByUserId.get(userId) ?? 0) === minCount);
+  return candidates[randomInt(candidates.length)];
+}
+
 async function selectStageForMatch(
   tx: Tx,
   phase: { tournamentId: string; defaultStageId: string | null; stageSelectionMode: "ADMIN" | "RANDOM" },
 ) {
   if (phase.stageSelectionMode === "ADMIN" && phase.defaultStageId) {
-    return tx.tournamentStage.findUnique({ where: { id: phase.defaultStageId } });
+    return requireUsableTournamentStage(tx, phase.tournamentId, phase.defaultStageId);
   }
   const stages = await tx.tournamentStage.findMany({
     where: { tournamentId: phase.tournamentId, isActive: true },
@@ -363,6 +414,9 @@ export async function runMatchmaking(phaseId: string) {
       }
 
       const selectedStage = await selectStageForMatch(tx, phase);
+      const allPlayers = [...teams.teamA, ...teams.teamB];
+      const privateRoomCode = await generateAvailablePrivateRoomCode(tx);
+      const roomHostUserId = await selectRoomHostUserId(tx, allPlayers);
       const match = await tx.match.create({
         data: {
           tournamentId: phase.tournamentId,
@@ -373,6 +427,8 @@ export async function runMatchmaking(phaseId: string) {
           rule: phase.rule,
           stageId: selectedStage?.id,
           stageName: selectedStage?.name,
+          privateRoomCode,
+          roomHostUserId,
           status: "CREATED",
         },
       });

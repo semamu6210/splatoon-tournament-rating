@@ -50,6 +50,14 @@ export async function startMatch(matchId: string) {
     const match = await getMatchWithPlayers(tx, matchId);
     if (match.status !== "CREATED") throw new ApiError(400, "Only CREATED matches can start.");
     validateMatchPlayers(match.players);
+    const tournament = await tx.tournament.findUnique({ where: { id: match.tournamentId } });
+    if (tournament?.stagePoolEnabled) {
+      if (!match.stageId) throw new ApiError(400, "使用ステージを設定してください。");
+      const stage = await tx.tournamentStage.findUnique({ where: { id: match.stageId } });
+      if (!stage || stage.tournamentId !== match.tournamentId || !stage.isActive) {
+        throw new ApiError(400, "この大会で使用できないステージです。");
+      }
+    }
     return tx.match.update({ where: { id: matchId }, data: { status: "PLAYING" } });
   });
 }

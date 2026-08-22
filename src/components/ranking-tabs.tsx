@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { tournamentPhaseTypeLabel } from "@/lib/labels";
+
 type RankingRow = {
   rank: number;
   userId: string;
@@ -28,7 +30,7 @@ type RankingRow = {
 type RankingBlock = {
   blockId: string;
   blockName: string;
-  phaseType: string;
+  phaseType: keyof typeof tournamentPhaseTypeLabel;
   rows: RankingRow[];
 };
 
@@ -47,7 +49,7 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
     { id: "overall", label: "全体ランキング", rows: overall },
     ...blocks.map((block) => ({
       id: block.blockId,
-      label: `${block.phaseType} ${block.blockName}`,
+      label: `${tournamentPhaseTypeLabel[block.phaseType]} ${block.blockName}`,
       rows: block.rows,
     })),
   ];
@@ -79,7 +81,7 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
                   {row.rank}位 {playerLabel(row)}
                 </p>
                 <p className="mt-1 text-zinc-600">
-                  Rating {row.rating} / {row.wins}-{row.losses}
+                  現在レート {row.rating} / {row.wins}勝{row.losses}敗
                 </p>
               </div>
               {row.streakBadge && (
@@ -97,7 +99,7 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
               </p>
               <p>XP {row.areaXp}</p>
               <p>本戦 {row.advancedToMainEvent ? "対象" : "-"}</p>
-              {showFinalRank && <p>Final {row.finalRank ?? "-"}</p>}
+              {showFinalRank && <p>最終順位 {row.finalRank ?? "-"}</p>}
             </div>
           </div>
         ))}
@@ -108,13 +110,13 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
           <thead className="bg-zinc-100 text-zinc-600">
             <tr>
               <th className="px-3 py-2">順位</th>
-              <th className="px-3 py-2">User</th>
-              <th className="px-3 py-2">Rating</th>
-              <th className="px-3 py-2">W-L</th>
+              <th className="px-3 py-2">参加者</th>
+              <th className="px-3 py-2">現在レート</th>
+              <th className="px-3 py-2">勝敗</th>
               <th className="px-3 py-2">試合</th>
               <th className="px-3 py-2">XP</th>
               <th className="px-3 py-2">本戦</th>
-              {showFinalRank && <th className="px-3 py-2">Final</th>}
+              {showFinalRank && <th className="px-3 py-2">最終順位</th>}
             </tr>
           </thead>
           <tbody>

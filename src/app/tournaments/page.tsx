@@ -1,11 +1,17 @@
 import Link from "next/link";
 
 import { AuthControls } from "@/components/auth-controls";
+import { tournamentStatusLabel } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export default async function TournamentsPage() {
+type TournamentsPageProps = {
+  searchParams?: Promise<{ deleted?: string }>;
+};
+
+export default async function TournamentsPage({ searchParams }: TournamentsPageProps) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
   const tournaments = await prisma.tournament.findMany({
     orderBy: { createdAt: "desc" },
   });
@@ -19,6 +25,12 @@ export default async function TournamentsPage() {
           <AuthControls />
         </header>
 
+        {resolvedSearchParams.deleted === "1" && (
+          <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+            大会を削除しました
+          </div>
+        )}
+
         <div className="grid gap-3">
           {tournaments.length === 0 && <p className="text-zinc-600">大会はまだありません。</p>}
           {tournaments.map((tournament) => (
@@ -30,7 +42,7 @@ export default async function TournamentsPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-semibold">{tournament.name}</h2>
                 <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-700">
-                  {tournament.status}
+                  {tournamentStatusLabel[tournament.status]}
                 </span>
               </div>
               <p className="mt-2 text-sm text-zinc-600">

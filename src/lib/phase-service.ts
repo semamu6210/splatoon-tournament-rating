@@ -17,6 +17,7 @@ import {
   getPhaseTargetParticipants,
 } from "@/lib/ranking-service";
 import { prisma } from "@/lib/prisma";
+import { requireUsableTournamentStage } from "@/lib/stage-service";
 
 type Tx = Prisma.TransactionClient;
 
@@ -166,6 +167,9 @@ export async function createPhase(
     const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
     if (!tournament) throw new ApiError(404, "Tournament not found.");
     if (tournament.status === TournamentStatus.FINISHED) throw new ApiError(400, "FINISHED tournaments cannot add phases.");
+    if (data.defaultStageId) {
+      await requireUsableTournamentStage(tx, tournamentId, data.defaultStageId);
+    }
     const phase = await tx.tournamentPhase.create({ data: { tournamentId, status: "PENDING", ...data } });
     await tx.adminActionLog.create({
       data: {
@@ -242,7 +246,12 @@ export async function updatePhase(
     data.defaultStageId = typeof input.defaultStageId === "string" && input.defaultStageId.length > 0 ? input.defaultStageId : null;
   }
 
-  return prisma.tournamentPhase.update({ where: { id: phaseId }, data });
+  return prisma.$transaction(async (tx) => {
+    if (data.defaultStageId) {
+      await requireUsableTournamentStage(tx, phase.tournamentId, data.defaultStageId);
+    }
+    return tx.tournamentPhase.update({ where: { id: phaseId }, data });
+  });
 }
 
 export async function startPhase(adminUserId: string, phaseId: string) {

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { RankingTabs } from "@/components/ranking-tabs";
 import { auth } from "@/auth";
+import { tournamentPhaseTypeLabel } from "@/lib/labels";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { filterTournamentRankingsForViewer, getTournamentRankings } from "@/lib/ranking-service";
@@ -72,7 +73,7 @@ export default async function TournamentRankingPage({ params }: PageProps) {
             <h1 className="text-3xl font-bold">{tournament.name} ランキング</h1>
             <p className="mt-2 text-sm text-zinc-600">
               {tournament.status === "FINISHED" ? "最終結果" : "現在ランキング"} / 現在フェーズ{" "}
-              {activePhase?.phaseType ?? "-"}
+              {activePhase ? tournamentPhaseTypeLabel[activePhase.phaseType] : "-"}
             </p>
           </div>
         </header>

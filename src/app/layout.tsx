@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Splatoon Tournament Rating System",
-  description: "Tournament-only rating and matchmaking service for Splatoon.",
+  title: "Splatoon 大会レーティングシステム",
+  description: "Splatoon大会向けのレート計算・マッチングサービスです。",
 };
 
 export default function RootLayout({

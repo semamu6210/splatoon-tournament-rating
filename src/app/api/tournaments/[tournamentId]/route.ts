@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/authz";
+import { requireAdmin, requireUser } from "@/lib/authz";
 import { fail, ok, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import {
@@ -6,7 +6,7 @@ import {
   serializeRatingConfig,
   serializeTournament,
 } from "@/lib/serializers";
-import { updateTournament, type TournamentInput } from "@/lib/tournament-service";
+import { deleteTournament, updateTournament, type TournamentInput } from "@/lib/tournament-service";
 
 type Context = {
   params: Promise<{ tournamentId: string }>;
@@ -64,6 +64,19 @@ export async function PATCH(request: Request, context: Context) {
     const tournament = await updateTournament(user.id, tournamentId, body);
 
     return ok({ tournament: serializeTournament(tournament) });
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function DELETE(request: Request, context: Context) {
+  try {
+    const user = await requireUser();
+    const { tournamentId } = await context.params;
+    const body = await readJson<{ name?: unknown }>(request);
+    const result = await deleteTournament(user, tournamentId, body);
+
+    return ok(result);
   } catch (error) {
     return fail(error);
   }
