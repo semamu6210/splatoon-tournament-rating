@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { isTerminalQueueStatus, queueFallbackIntervalMs } from "@/lib/realtime-polling";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type QueueStatus =
   | { status: "NOT_QUEUED" }
@@ -12,30 +15,84 @@ type QueueStatus =
 type QueuePanelProps = {
   phaseId: string;
   initialStatus: QueueStatus;
+  queueEntryId: string | null;
 };
 
-export function QueuePanel({ phaseId, initialStatus }: QueuePanelProps) {
+export function QueuePanel({ phaseId, initialStatus, queueEntryId }: QueuePanelProps) {
   const router = useRouter();
   const [status, setStatus] = useState<QueueStatus | null>(initialStatus);
+  const [realtimeReady, setRealtimeReady] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const stoppedRef = useRef(isTerminalQueueStatus(initialStatus.status));
 
   const loadStatus = useCallback(async () => {
-    const response = await fetch(`/api/phases/${phaseId}/queue/status`);
+    const response = await fetch(`/api/phases/${phaseId}/queue/status-lite`, { cache: "no-store" });
     if (!response.ok) {
       setStatus(null);
       return;
     }
-    setStatus((await response.json()) as QueueStatus);
+    const liteStatus = (await response.json()) as { status: QueueStatus["status"]; matchId: string | null };
+    setStatus((current) => {
+      if (liteStatus.status === "WAITING") {
+        if (current?.status === "WAITING") {
+          return {
+            ...current,
+            waitingSeconds: Math.floor((Date.now() - new Date(current.joinedAt).getTime()) / 1000),
+          };
+        }
+        return { status: "WAITING", joinedAt: new Date().toISOString(), waitingSeconds: 0 };
+      }
+      if (liteStatus.status === "MATCHED" && liteStatus.matchId) {
+        stoppedRef.current = isTerminalQueueStatus(liteStatus.status);
+        return { status: "MATCHED", matchId: liteStatus.matchId };
+      }
+      stoppedRef.current = false;
+      return { status: "NOT_QUEUED" };
+    });
   }, [phaseId]);
 
   useEffect(() => {
+    if (status?.status !== "WAITING" || !queueEntryId) return;
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      return;
+    }
+
+    stoppedRef.current = false;
+    const channel = supabase
+      .channel(`queue-status:${phaseId}:${queueEntryId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "QueueStatusEvent",
+          filter: `queueEntryId=eq.${queueEntryId}`,
+        },
+        () => {
+          if (!stoppedRef.current) void loadStatus();
+        },
+      )
+      .subscribe((subscriptionStatus) => {
+        setRealtimeReady(subscriptionStatus === "SUBSCRIBED");
+      });
+
+    return () => {
+      stoppedRef.current = true;
+      setRealtimeReady(false);
+      void supabase.removeChannel(channel);
+    };
+  }, [loadStatus, phaseId, queueEntryId, status?.status]);
+
+  useEffect(() => {
     if (status?.status !== "WAITING") return;
+    const intervalMs = queueFallbackIntervalMs(realtimeReady);
     const id = window.setInterval(() => {
       void loadStatus();
-    }, 5000);
+    }, intervalMs);
     return () => window.clearInterval(id);
-  }, [loadStatus, status?.status]);
+  }, [loadStatus, realtimeReady, status?.status]);
 
   async function post(url: string) {
     setPending(true);
@@ -50,7 +107,9 @@ export function QueuePanel({ phaseId, initialStatus }: QueuePanelProps) {
     }
 
     await loadStatus();
-    router.refresh();
+    if (url.endsWith("/join") || url.endsWith("/leave")) {
+      router.refresh();
+    }
   }
 
   return (

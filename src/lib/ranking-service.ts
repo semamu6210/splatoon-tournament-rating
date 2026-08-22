@@ -1,4 +1,4 @@
-import { Prisma, type TournamentParticipant, type User } from "@prisma/client";
+import { Prisma, type TournamentParticipant, type TournamentPhaseType, type User } from "@prisma/client";
 
 import { formatRating } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
@@ -37,6 +37,14 @@ export type RankingRow = {
   } | null;
 };
 
+type TournamentRankingBlock = {
+  phaseId: string;
+  phaseType: TournamentPhaseType;
+  blockId: string;
+  blockName: string;
+  rows: RankingRow[];
+};
+
 export type AdvancementTiePolicy = "NEEDS_ADMIN_DECISION";
 
 export const ADVANCEMENT_TIE_POLICY: AdvancementTiePolicy = "NEEDS_ADMIN_DECISION";
@@ -70,6 +78,9 @@ export type BlockAdvancementCandidates = {
   }>;
   totalAdvancePlayerCount: number;
 };
+
+const TOURNAMENT_RANKINGS_TTL_MS = 20_000;
+const tournamentRankingCache = new Map<string, { expiresAt: number; value: Promise<{ overall: RankingRow[]; blocks: TournamentRankingBlock[] }> }>();
 
 export function assignCompetitionRanks(participants: RankedParticipant[]): RankingRow[] {
   const rows: RankingRow[] = [];
@@ -197,7 +208,7 @@ export async function getPhaseRanking(phaseId: string) {
   };
 }
 
-export async function getTournamentRankings(tournamentId: string) {
+async function loadTournamentRankings(tournamentId: string) {
   const participants = await prisma.tournamentParticipant.findMany({
     where: {
       tournamentId,
@@ -267,6 +278,24 @@ export async function getTournamentRankings(tournamentId: string) {
   );
 
   return { overall: rows, blocks };
+}
+
+export async function getTournamentRankings(tournamentId: string) {
+  if (process.env.NODE_ENV === "test") {
+    return loadTournamentRankings(tournamentId);
+  }
+
+  const cached = tournamentRankingCache.get(tournamentId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const value = loadTournamentRankings(tournamentId).catch((error) => {
+    tournamentRankingCache.delete(tournamentId);
+    throw error;
+  });
+  tournamentRankingCache.set(tournamentId, { expiresAt: Date.now() + TOURNAMENT_RANKINGS_TTL_MS, value });
+  return value;
 }
 
 export function buildOverallAdvancementCandidates(rows: RankingRow[], advancePlayerCount: number): AdvancementCandidates {

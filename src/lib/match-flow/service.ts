@@ -5,6 +5,7 @@ import { calculatePlayerRatingResults } from "@/lib/match-flow/rating";
 import { checkAndAdvanceRound } from "@/lib/matchmaking/service";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { touchMatchStatusEventTx } from "@/lib/realtime-status-events";
 import { ensureTestDummiesWaitingForPhase } from "@/lib/test-dummy-queue";
 import { submitAutomaticTestVotes } from "@/lib/test-dummy-votes";
 
@@ -78,7 +79,9 @@ export async function startMatch(matchId: string) {
         throw new ApiError(400, "この大会で使用できないステージです。");
       }
     }
-    return tx.match.update({ where: { id: matchId }, data: { status: "PLAYING", startedAt: match.startedAt ?? new Date() } });
+    const updated = await tx.match.update({ where: { id: matchId }, data: { status: "PLAYING", startedAt: match.startedAt ?? new Date() } });
+    await touchMatchStatusEventTx(tx, matchId, updated);
+    return updated;
   });
 }
 
@@ -92,7 +95,9 @@ export async function openResultReporting(matchId: string, userId?: string, role
       throw new ApiError(403, "Only the room host or admin can end the match.");
     }
     assertResultReportDelayElapsed(match, role);
-    return tx.match.update({ where: { id: matchId }, data: { status: "RESULT_REPORTING" } });
+    const updated = await tx.match.update({ where: { id: matchId }, data: { status: "RESULT_REPORTING" } });
+    await touchMatchStatusEventTx(tx, matchId, updated);
+    return updated;
   });
 }
 
@@ -117,10 +122,12 @@ export async function submitResultReport(userId: string, matchId: string, report
       update: { reportedWinnerTeam: team },
       create: { matchId, userId, reportedWinnerTeam: team },
     });
-    return tx.match.update({
+    const updated = await tx.match.update({
       where: { id: matchId },
       data: { winnerTeam: team, status: "VOTE_REPORTING" },
     });
+    await touchMatchStatusEventTx(tx, matchId, updated);
+    return updated;
   });
 
   await submitAutomaticTestVotesIfAllowed(matchId);
@@ -156,6 +163,7 @@ export async function forceResult(adminUserId: string, matchId: string, winnerTe
         },
       },
     });
+    await touchMatchStatusEventTx(tx, matchId, after);
     return after;
   });
 }
@@ -212,6 +220,7 @@ export async function submitPlayerVotes(userId: string, matchId: string, votes: 
         voteType: vote.voteType,
       })),
     });
+    await touchMatchStatusEventTx(tx, matchId);
     return tx.playerVote.findMany({ where: { matchId, voterUserId: userId } });
   });
 
@@ -300,6 +309,7 @@ export async function closeVoting(adminUserId: string, matchId: string, reason: 
       },
     });
 
+    await touchMatchStatusEventTx(tx, matchId, after);
     return after;
   });
 }
@@ -333,6 +343,7 @@ export async function cancelMatch(adminUserId: string, matchId: string, reason: 
         },
       },
     });
+    await touchMatchStatusEventTx(tx, matchId, after);
     return after;
   });
 }
@@ -359,10 +370,11 @@ async function applyRatingOnce(matchId: string) {
       const completeVoterIds = getCompleteVoterIds(playerUserIds, votes);
       const allPlayersVoted = match.players.length === 8 && completeVoterIds.size === 8;
       if (!match.votingClosedAt && allPlayersVoted) {
-        await tx.match.update({
+        const updated = await tx.match.update({
           where: { id: matchId },
           data: { votingClosedAt: new Date() },
         });
+        await touchMatchStatusEventTx(tx, matchId, updated);
       }
       const results = calculatePlayerRatingResults({
         players: match.players,
@@ -427,10 +439,12 @@ async function applyRatingOnce(matchId: string) {
         });
       }
 
-      return tx.match.update({
+      const confirmed = await tx.match.update({
         where: { id: matchId },
         data: { status: "CONFIRMED" },
       });
+      await touchMatchStatusEventTx(tx, matchId, confirmed);
+      return confirmed;
     },
     RATING_TRANSACTION_OPTIONS,
   );

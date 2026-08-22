@@ -149,23 +149,37 @@ export default async function TournamentDetailPage({ params }: PageProps) {
       : [];
   const voteCount = (rows: typeof myVoteStats, voteType: "STRONG" | "WEAK") =>
     rows.find((row) => row.voteType === voteType)?._count.voteType ?? 0;
-  const phaseProgress = await Promise.all(
-    tournament.phases.map(async (phase) => {
-      const targetCount =
-        (await prisma.tournamentPhaseParticipant.count({ where: { phaseId: phase.id, isEligible: true } })) ||
-        tournament.participants.length;
-      const completedSlots = await prisma.matchPlayer.count({
-        where: { match: { phaseId: phase.id, status: "CONFIRMED" } },
-      });
-      const totalSlots = targetCount * phase.requiredMatchesPerPlayer;
-      return {
-        phase,
-        completedSlots,
-        totalSlots,
-        percentage: totalSlots > 0 ? Math.round((completedSlots / totalSlots) * 100) : 0,
-      };
-    }),
-  );
+  const phaseIds = tournament.phases.map((phase) => phase.id);
+  const [eligibleTargetCounts, confirmedSlotRows] =
+    phaseIds.length > 0
+      ? await Promise.all([
+          prisma.tournamentPhaseParticipant.groupBy({
+            by: ["phaseId"],
+            where: { phaseId: { in: phaseIds }, isEligible: true },
+            _count: { phaseId: true },
+          }),
+          prisma.matchPlayer.findMany({
+            where: { match: { phaseId: { in: phaseIds }, status: "CONFIRMED" } },
+            select: { match: { select: { phaseId: true } } },
+          }),
+        ])
+      : [[], []];
+  const targetCountByPhaseId = new Map(eligibleTargetCounts.map((row) => [row.phaseId, row._count.phaseId]));
+  const completedSlotsByPhaseId = new Map<string, number>();
+  for (const row of confirmedSlotRows) {
+    completedSlotsByPhaseId.set(row.match.phaseId, (completedSlotsByPhaseId.get(row.match.phaseId) ?? 0) + 1);
+  }
+  const phaseProgress = tournament.phases.map((phase) => {
+    const targetCount = targetCountByPhaseId.get(phase.id) || tournament.participants.length;
+    const completedSlots = completedSlotsByPhaseId.get(phase.id) ?? 0;
+    const totalSlots = targetCount * phase.requiredMatchesPerPlayer;
+    return {
+      phase,
+      completedSlots,
+      totalSlots,
+      percentage: totalSlots > 0 ? Math.round((completedSlots / totalSlots) * 100) : 0,
+    };
+  });
   const activeRound = activePhase?.rounds[0] ?? null;
   const myActivePhaseCount = myRanking?.currentPhase?.confirmedMatchesInPhase ?? 0;
   const waitingForOtherBlocks =
@@ -227,7 +241,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
         </section>
 
         {session?.user && myParticipant && tournament.status === "ACTIVE" && activePhase && (
-          <QueuePanel initialStatus={queueStatus} phaseId={activePhase.id} />
+          <QueuePanel initialStatus={queueStatus} phaseId={activePhase.id} queueEntryId={queueEntry?.id ?? null} />
         )}
 
         <section className="rounded-md border border-zinc-300 bg-white p-4">

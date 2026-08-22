@@ -17,7 +17,7 @@ import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getTournamentOperationWarnings } from "@/lib/operations-monitor";
 import { getTournamentRankings } from "@/lib/ranking-service";
-import { getPhaseReadiness, getQualifierAdvancementPreview } from "@/lib/phase-service";
+import { getQualifierAdvancementPreview } from "@/lib/phase-service";
 import { serializeRatingConfig } from "@/lib/serializers";
 import { getTestDummyPhaseStatuses } from "@/lib/test-dummy-queue";
 import { advancementModeLabel, matchStatusLabel, tournamentPhaseStatusLabel, tournamentPhaseTypeLabel, tournamentStatusLabel } from "@/lib/labels";
@@ -195,8 +195,51 @@ export default async function AdminTournamentPage({ params }: PageProps) {
       rows: block.rows.map(plainRankingRow),
     })),
   };
+  const phaseIds = tournament.phases.map((phase) => phase.id);
+  const [confirmedSlots, unfinishedMatches] =
+    phaseIds.length > 0
+      ? await Promise.all([
+          prisma.matchPlayer.findMany({
+            where: { match: { phaseId: { in: phaseIds }, status: "CONFIRMED" } },
+            select: { userId: true, match: { select: { phaseId: true } } },
+          }),
+          prisma.match.groupBy({
+            by: ["phaseId"],
+            where: { phaseId: { in: phaseIds }, status: { in: ["CREATED", "PLAYING", "RESULT_REPORTING", "VOTE_REPORTING"] } },
+            _count: { phaseId: true },
+          }),
+        ])
+      : [[], []];
+  const confirmedUsersByPhaseId = new Map<string, Map<string, number>>();
+  for (const slot of confirmedSlots) {
+    const counts = confirmedUsersByPhaseId.get(slot.match.phaseId) ?? new Map<string, number>();
+    counts.set(slot.userId, (counts.get(slot.userId) ?? 0) + 1);
+    confirmedUsersByPhaseId.set(slot.match.phaseId, counts);
+  }
+  const unfinishedMatchCountByPhaseId = new Map(unfinishedMatches.map((row) => [row.phaseId, row._count.phaseId]));
   const readinessByPhaseId = new Map(
-    await Promise.all(tournament.phases.map(async (phase) => [phase.id, await getPhaseReadiness(phase.id)] as const)),
+    tournament.phases.map((phase) => {
+      const targetUserIds =
+        phase.participants.length > 0
+          ? tournament.participants
+              .filter((participant) => phase.participants.some((item) => item.tournamentParticipantId === participant.id))
+              .map((participant) => participant.userId)
+          : tournament.participants.filter((participant) => participant.isActive && participant.rating !== null).map((participant) => participant.userId);
+      const counts = confirmedUsersByPhaseId.get(phase.id) ?? new Map<string, number>();
+      const completeCount = targetUserIds.filter((userId) => (counts.get(userId) ?? 0) >= phase.requiredMatchesPerPlayer).length;
+      const unfinishedMatchCount = unfinishedMatchCountByPhaseId.get(phase.id) ?? 0;
+      const waitingQueueEntries = phase.queueEntries.length;
+      return [
+        phase.id,
+        {
+          canComplete: phase.status === "ACTIVE" && completeCount === targetUserIds.length && unfinishedMatchCount === 0 && waitingQueueEntries === 0,
+          completeCount,
+          rowCount: targetUserIds.length,
+          unfinishedMatches: unfinishedMatchCount,
+          waitingQueueEntries,
+        },
+      ] as const;
+    }),
   );
   const advancementByPhaseId = new Map(
     await Promise.all(
@@ -335,8 +378,8 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                   <p className="mt-3 text-sm font-semibold text-green-700">全員規定試合数完了・フェーズを終了できます。</p>
                 ) : (
                   <p className="mt-3 text-sm text-zinc-600">
-                    完了状況: {readinessByPhaseId.get(phase.id)?.rows.filter((row) => row.complete).length ?? 0}/
-                    {readinessByPhaseId.get(phase.id)?.rows.length ?? 0} / 未確定Match{" "}
+                    完了状況: {readinessByPhaseId.get(phase.id)?.completeCount ?? 0}/
+                    {readinessByPhaseId.get(phase.id)?.rowCount ?? 0} / 未確定Match{" "}
                     {readinessByPhaseId.get(phase.id)?.unfinishedMatches ?? 0} / 待機中{" "}
                     {readinessByPhaseId.get(phase.id)?.waitingQueueEntries ?? 0}
                   </p>

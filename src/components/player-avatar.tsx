@@ -9,6 +9,17 @@ type PlayerAvatarProps = {
   size?: number;
 };
 
+function sizedDiscordAvatarUrl(avatarUrl: string, size: number) {
+  if (!avatarUrl.includes("cdn.discordapp.com/avatars/")) return avatarUrl;
+  try {
+    const url = new URL(avatarUrl);
+    url.searchParams.set("size", String(Math.min(Math.max(32, 2 ** Math.ceil(Math.log2(size))), 128)));
+    return url.toString();
+  } catch {
+    return avatarUrl;
+  }
+}
+
 export function PlayerAvatar({ avatarUrl, name, size = 40 }: PlayerAvatarProps) {
   const [failed, setFailed] = useState(false);
   const initial = name.trim().charAt(0).toUpperCase() || "?";
@@ -25,7 +36,7 @@ export function PlayerAvatar({ avatarUrl, name, size = 40 }: PlayerAvatarProps) 
           className="h-full w-full object-cover"
           height={size}
           onError={() => setFailed(true)}
-          src={avatarUrl!}
+          src={sizedDiscordAvatarUrl(avatarUrl!, size)}
           width={size}
         />
       ) : (

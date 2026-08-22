@@ -313,6 +313,18 @@ model QueueEntry {
   @@index([matchId])
 }
 
+model QueueStatusEvent {
+  id           String   @id @default(cuid())
+  phaseId      String
+  queueEntryId String   @unique
+  status       String
+  matchId      String?
+  version      Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@index([queueEntryId, updatedAt])
+}
+
 model Match {
   id                  String                 @id @default(cuid())
   tournamentId        String
@@ -353,6 +365,19 @@ model Match {
   @@index([stageId])
   @@index([roomHostUserId])
   @@index([privateRoomCode])
+}
+
+model MatchStatusEvent {
+  matchId             String      @id
+  status              MatchStatus
+  winnerTeam          Team?
+  votingClosedAt      DateTime?
+  ratingAppliedAt     DateTime?
+  submittedVoterCount Int         @default(0)
+  version             Int         @default(0)
+  updatedAt           DateTime    @updatedAt
+
+  @@index([updatedAt])
 }
 
 model TournamentPhaseRound {

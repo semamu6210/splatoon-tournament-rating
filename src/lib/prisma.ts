@@ -13,6 +13,14 @@ function getRuntimeDatabaseUrl() {
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set.");
   }
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.NEXT_PHASE !== "phase-production-build" &&
+    process.env.DIRECT_URL &&
+    connectionString === process.env.DIRECT_URL
+  ) {
+    throw new Error("Runtime DATABASE_URL must not use DIRECT_URL. Use the Supabase transaction pooler URL for runtime.");
+  }
 
   return connectionString;
 }
@@ -23,7 +31,7 @@ function getPrismaPgPool() {
   }
 
   const connectionString = getRuntimeDatabaseUrl();
-  const defaultPoolMax = process.env.NODE_ENV === "production" ? 1 : process.env.NODE_ENV === "test" ? 2 : 10;
+  const defaultPoolMax = process.env.NODE_ENV === "production" ? 1 : process.env.NODE_ENV === "test" ? 2 : 5;
   const max = Number(process.env.DATABASE_POOL_MAX ?? defaultPoolMax);
   const pool = new Pool({
     connectionString,

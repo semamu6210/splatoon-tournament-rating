@@ -7,6 +7,7 @@ import { splitIntoBalancedTeams } from "@/lib/matchmaking/team";
 import type { MatchmakingPlayer, WaitingPlayer } from "@/lib/matchmaking/types";
 import { prisma } from "@/lib/prisma";
 import { validateCompleteRatingConfig } from "@/lib/rating-config";
+import { touchQueueStatusEventTx, touchQueueStatusEventsTx } from "@/lib/realtime-status-events";
 import { requireUsableTournamentStage } from "@/lib/stage-service";
 import { ensureTestDummiesWaitingForPhaseTx } from "@/lib/test-dummy-queue";
 
@@ -111,13 +112,17 @@ export async function joinQueue(userId: string, phaseId: string) {
     throw new ApiError(409, "Already waiting in this phase.");
   }
 
-  return prisma.queueEntry.create({
-    data: {
-      tournamentId: phase.tournamentId,
-      phaseId,
-      userId,
-      status: QueueStatus.WAITING,
-    },
+  return prisma.$transaction(async (tx) => {
+    const entry = await tx.queueEntry.create({
+      data: {
+        tournamentId: phase.tournamentId,
+        phaseId,
+        userId,
+        status: QueueStatus.WAITING,
+      },
+    });
+    await touchQueueStatusEventTx(tx, { phaseId, queueEntryId: entry.id, status: QueueStatus.WAITING });
+    return entry;
   });
 }
 
@@ -140,9 +145,13 @@ export async function leaveQueue(userId: string, phaseId: string) {
     throw new ApiError(404, "WAITING queue entry not found.");
   }
 
-  return prisma.queueEntry.update({
-    where: { id: entry.id },
-    data: { status: QueueStatus.CANCELLED },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.queueEntry.update({
+      where: { id: entry.id },
+      data: { status: QueueStatus.CANCELLED },
+    });
+    await touchQueueStatusEventTx(tx, { phaseId, queueEntryId: entry.id, status: "NOT_QUEUED" });
+    return updated;
   });
 }
 
@@ -186,6 +195,39 @@ export async function getQueueStatus(userId: string, phaseId: string) {
     status: "MATCHED" as const,
     matchId,
   };
+}
+
+export async function getQueueStatusLite(userId: string, phaseId: string) {
+  const entry = await prisma.queueEntry.findFirst({
+    where: {
+      phaseId,
+      userId,
+      status: { in: [QueueStatus.WAITING, QueueStatus.MATCHED] },
+    },
+    orderBy: { joinedAt: "desc" },
+    select: { status: true, matchId: true },
+  });
+
+  if (entry) {
+    return {
+      status: entry.status,
+      matchId: entry.matchId,
+    };
+  }
+
+  const fallbackMatch = await prisma.match.findFirst({
+    where: {
+      phaseId,
+      players: { some: { userId } },
+      status: { in: [...ACTIVE_MATCH_STATUSES] },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+
+  return fallbackMatch
+    ? { status: QueueStatus.MATCHED, matchId: fallbackMatch.id }
+    : { status: "NOT_QUEUED" as const, matchId: null };
 }
 
 async function recentRelations(tx: Tx, userIds: string[], phaseId: string) {
@@ -440,6 +482,15 @@ async function createMatchForSelectedPlayers(params: {
       where: { id: { in: params.queueEntryIds }, status: QueueStatus.MATCHED },
       data: { matchId: match.id },
     });
+    await touchQueueStatusEventsTx(
+      params.tx,
+      allPlayers.map((player) => ({
+        phaseId: params.phase.id,
+        queueEntryId: player.queueEntryId,
+        status: QueueStatus.MATCHED,
+        matchId: match.id,
+      })),
+    );
   }
 
   return {
