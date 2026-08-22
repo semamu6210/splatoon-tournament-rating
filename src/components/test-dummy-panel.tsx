@@ -5,10 +5,17 @@ import { useState } from "react";
 
 type TestDummyPanelProps = {
   canDelete: boolean;
+  statuses: Array<{
+    id: string;
+    name: string;
+    status: string;
+    completedMatches: number;
+    requiredMatches: number;
+  }>;
   tournamentId: string;
 };
 
-export function TestDummyPanel({ canDelete, tournamentId }: TestDummyPanelProps) {
+export function TestDummyPanel({ canDelete, statuses, tournamentId }: TestDummyPanelProps) {
   const router = useRouter();
   const [count, setCount] = useState(6);
   const [areaXp, setAreaXp] = useState(2500);
@@ -90,6 +97,30 @@ export function TestDummyPanel({ canDelete, tournamentId }: TestDummyPanelProps)
           </button>
         )}
       </div>
+      {statuses.length > 0 && (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-80 text-left text-sm">
+            <thead className="bg-zinc-100 text-zinc-600">
+              <tr>
+                <th className="px-3 py-2">ダミー</th>
+                <th className="px-3 py-2">状態</th>
+                <th className="px-3 py-2">試合数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {statuses.map((status) => (
+                <tr className="border-t border-zinc-200" key={status.id}>
+                  <td className="px-3 py-2">{status.name}</td>
+                  <td className="px-3 py-2">{status.status}</td>
+                  <td className="px-3 py-2">
+                    {status.completedMatches}/{status.requiredMatches}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {message && <p className="mt-3 text-sm text-zinc-700">{message}</p>}
     </section>
   );

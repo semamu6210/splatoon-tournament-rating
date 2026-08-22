@@ -106,8 +106,8 @@ export function AdminMatchActions({ matchId, stages = [], currentStageId = null,
           <button className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold" onClick={() => void post(`/api/admin/matches/${matchId}/test-dummy-votes`)} type="button">
             ダミーの投票を自動提出
           </button>
-          <button className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold" onClick={() => void post(`/api/admin/matches/${matchId}/test-dummy-votes`, { leaveOneRealUserUnvoted: true })} type="button">
-            7/8状態を作る
+          <button className="rounded-md bg-amber-600 px-3 py-2 text-sm font-semibold text-white" onClick={() => window.confirm("この試合をテスト用に完全自動進行しますか？") && void post(`/api/admin/matches/${matchId}/fully-automate-test`)} type="button">
+            この試合を完全自動進行
           </button>
         </div>
       )}

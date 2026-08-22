@@ -8,6 +8,7 @@ import type { MatchmakingPlayer, WaitingPlayer } from "@/lib/matchmaking/types";
 import { prisma } from "@/lib/prisma";
 import { validateCompleteRatingConfig } from "@/lib/rating-config";
 import { requireUsableTournamentStage } from "@/lib/stage-service";
+import { ensureTestDummiesWaitingForPhaseTx } from "@/lib/test-dummy-queue";
 
 type Tx = Prisma.TransactionClient;
 const ACTIVE_MATCH_STATUSES = ["CREATED", "PLAYING", "RESULT_REPORTING", "VOTE_REPORTING"] as const;
@@ -234,7 +235,7 @@ async function recentRelations(tx: Tx, userIds: string[], phaseId: string) {
   return relations;
 }
 
-async function getWaitingPlayers(tx: Tx, phaseId: string, losingStreakPenalty: Prisma.Decimal) {
+async function getWaitingPlayers(tx: Tx, phaseId: string, requiredMatchesPerPlayer: number, losingStreakPenalty: Prisma.Decimal) {
   const entries = await tx.queueEntry.findMany({
     where: { phaseId, status: QueueStatus.WAITING },
     include: {
@@ -249,6 +250,12 @@ async function getWaitingPlayers(tx: Tx, phaseId: string, losingStreakPenalty: P
 
   const userIds = entries.map((entry) => entry.userId);
   const relations = await recentRelations(tx, userIds, phaseId);
+  const confirmedCounts = await tx.matchPlayer.groupBy({
+    by: ["userId"],
+    where: { userId: { in: userIds }, match: { phaseId, status: "CONFIRMED" } },
+    _count: { userId: true },
+  });
+  const confirmedCountByUserId = new Map(confirmedCounts.map((count) => [count.userId, count._count.userId]));
   const players: WaitingPlayer[] = [];
 
   for (const entry of entries) {
@@ -261,6 +268,10 @@ async function getWaitingPlayers(tx: Tx, phaseId: string, losingStreakPenalty: P
     }
 
     const relation = relations.get(entry.userId);
+    const completedMatchesInPhase = confirmedCountByUserId.get(entry.userId) ?? 0;
+    if (completedMatchesInPhase >= requiredMatchesPerPlayer) {
+      continue;
+    }
 
     players.push({
       queueEntryId: entry.id,
@@ -271,6 +282,7 @@ async function getWaitingPlayers(tx: Tx, phaseId: string, losingStreakPenalty: P
       losingStreakPenalty,
       areaXp: participant.areaXp,
       isDummy: participant.isDummy,
+      completedMatchesInPhase,
       recentOpponentIds: relation?.opponents ?? new Set(),
       recentTeammateIds: relation?.teammates ?? new Set(),
     });
@@ -363,6 +375,7 @@ export async function runMatchmaking(phaseId: string) {
       if (phase.tournament.status !== TournamentStatus.ACTIVE || phase.status !== TournamentPhaseStatus.ACTIVE) {
         throw new ApiError(400, "Tournament and phase must be ACTIVE.");
       }
+      await ensureTestDummiesWaitingForPhaseTx(tx, phaseId);
 
       const activeConfig = await tx.tournamentRatingConfig.findFirst({
         where: { tournamentId: phase.tournamentId, isActive: true },
@@ -383,7 +396,7 @@ export async function runMatchmaking(phaseId: string) {
         return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
       }
 
-      const waitingPlayers = await getWaitingPlayers(tx, phaseId, activeConfig.losingStreakPenalty);
+      const waitingPlayers = await getWaitingPlayers(tx, phaseId, phase.requiredMatchesPerPlayer, activeConfig.losingStreakPenalty);
       const selected = selectEightPlayers(waitingPlayers);
 
       if (!selected) {

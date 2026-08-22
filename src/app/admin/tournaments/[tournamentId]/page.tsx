@@ -18,6 +18,7 @@ import { getTournamentOperationWarnings } from "@/lib/operations-monitor";
 import { getTournamentRankings } from "@/lib/ranking-service";
 import { getPhaseReadiness, getQualifierAdvancementPreview } from "@/lib/phase-service";
 import { serializeRatingConfig } from "@/lib/serializers";
+import { getTestDummyPhaseStatuses } from "@/lib/test-dummy-queue";
 import { advancementModeLabel, matchStatusLabel, tournamentPhaseStatusLabel, tournamentPhaseTypeLabel, tournamentStatusLabel } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
@@ -182,6 +183,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
   const activeConfig = activeRatingConfig ? serializeRatingConfig(activeRatingConfig) : null;
   const rankings = await getTournamentRankings(tournament.id);
   const operationWarnings = await getTournamentOperationWarnings(tournament.id);
+  const testDummyStatuses = tournament.isTestTournament ? await getTestDummyPhaseStatuses(tournament.id) : [];
   const tabRankings = {
     overall: rankings.overall.map(plainRankingRow),
     blocks: rankings.blocks.map((block) => ({
@@ -250,6 +252,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
         {tournament.isTestTournament && (
           <TestDummyPanel
             canDelete={tournament.status === "DRAFT" || tournament.status === "REGISTRATION"}
+            statuses={testDummyStatuses}
             tournamentId={tournament.id}
           />
         )}

@@ -4,6 +4,8 @@ import { ApiError } from "@/lib/http";
 import { calculatePlayerRatingResults } from "@/lib/match-flow/rating";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { ensureTestDummiesWaitingForPhase } from "@/lib/test-dummy-queue";
+import { submitAutomaticTestVotes } from "@/lib/test-dummy-votes";
 
 type Tx = Prisma.TransactionClient;
 
@@ -81,7 +83,7 @@ export async function openResultReporting(matchId: string, userId?: string, role
 
 export async function submitResultReport(userId: string, matchId: string, reportedWinnerTeam: unknown, role?: UserRole) {
   const team = assertTeam(reportedWinnerTeam);
-  return prisma.$transaction(async (tx) => {
+  const match = await prisma.$transaction(async (tx) => {
     const match = await getMatchWithPlayers(tx, matchId);
     if (match.status !== "RESULT_REPORTING") {
       throw new ApiError(400, "Match is not accepting result reports.");
@@ -104,6 +106,10 @@ export async function submitResultReport(userId: string, matchId: string, report
       data: { winnerTeam: team, status: "VOTE_REPORTING" },
     });
   });
+
+  await submitAutomaticTestVotesIfAllowed(matchId);
+  await applyRatingIfAllVotesComplete(matchId);
+  return match;
 }
 
 export async function forceResult(adminUserId: string, matchId: string, winnerTeam: unknown, reason: unknown) {
@@ -393,7 +399,9 @@ async function applyRatingOnce(matchId: string) {
 
 export async function applyRating(matchId: string) {
   try {
-    return await applyRatingOnce(matchId);
+    const match = await applyRatingOnce(matchId);
+    await ensureTestDummiesWaitingForPhase(match.phaseId);
+    return match;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
       throw new ApiError(409, "Rating application conflicted with another request.");
@@ -427,6 +435,17 @@ async function applyRatingIfAllVotesComplete(matchId: string) {
       return;
     }
     console.error("Automatic rating application failed.", error);
+  }
+}
+
+async function submitAutomaticTestVotesIfAllowed(matchId: string) {
+  try {
+    await submitAutomaticTestVotes(matchId);
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 400 || error.status === 403 || error.status === 404)) {
+      return;
+    }
+    throw error;
   }
 }
 

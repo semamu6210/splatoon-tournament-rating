@@ -18,6 +18,7 @@ import {
 } from "@/lib/ranking-service";
 import { prisma } from "@/lib/prisma";
 import { requireUsableTournamentStage } from "@/lib/stage-service";
+import { ensureTestDummiesWaitingForPhaseTx } from "@/lib/test-dummy-queue";
 
 type Tx = Prisma.TransactionClient;
 
@@ -309,13 +310,14 @@ export async function startPhase(adminUserId: string, phaseId: string) {
           where: { id: phaseId },
           data: { status: "ACTIVE", startedAt: new Date() },
         });
+        const dummyQueue = await ensureTestDummiesWaitingForPhaseTx(tx, phaseId);
         await tx.adminActionLog.create({
           data: {
             adminUserId,
             action: "PHASE_STARTED",
             targetType: "TournamentPhase",
             targetId: phaseId,
-            metadata: { participantCount: participants.length },
+            metadata: { participantCount: participants.length, dummyQueue },
           },
         });
         return started;

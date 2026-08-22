@@ -1,11 +1,12 @@
 import { TournamentPhaseStatus, UserRole } from "@prisma/client";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { forceResult, openResultReporting, startMatch, submitPlayerVotes } from "@/lib/match-flow/service";
+import { openResultReporting, startMatch, submitPlayerVotes, submitResultReport } from "@/lib/match-flow/service";
 import { joinQueue, runMatchmaking } from "@/lib/matchmaking/service";
 import { prisma } from "@/lib/prisma";
 import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
-import { addTestDummies, queueTestDummies, submitTestDummyVotes } from "@/lib/test-dummy-service";
+import { addTestDummies, fullyAutomateTestMatch, queueTestDummies, submitTestDummyVotes } from "@/lib/test-dummy-service";
+import { startPhase } from "@/lib/phase-service";
 import { createRatingConfigVersion, createTournament, joinTournament, openRegistration, startTournament } from "@/lib/tournament-service";
 
 const createdUserIds: string[] = [];
@@ -66,7 +67,7 @@ describe("test dummies", () => {
     );
   });
 
-  it("adds dummies, matches 2 real users with 6 dummies, creates 7/8 votes, and auto-applies on the final real vote", async () => {
+  it("adds dummies, matches 2 real users with 6 dummies, auto-votes dummies, and auto-applies on real votes", async () => {
     const { admin, tournament } = await createConfiguredTournament(true);
     await openRegistration(admin.id, tournament.id);
 
@@ -113,23 +114,24 @@ describe("test dummies", () => {
 
     await startMatch(match.id);
     await openResultReporting(match.id, match.roomHostUserId!, UserRole.PLAYER);
-    await forceResult(admin.id, match.id, "A", "test");
+    await submitResultReport(match.roomHostUserId!, match.id, "A", UserRole.PLAYER);
 
     const dummyVoteResult = await submitTestDummyVotes(admin.id, admin.role, match.id, { leaveOneRealUserUnvoted: true });
-    expect(dummyVoteResult.leftUnvotedUserId).toBeTruthy();
+    expect(dummyVoteResult.submitted).toBe(0);
 
     let voteRows = await prisma.playerVote.findMany({ where: { matchId: match.id } });
-    expect(new Set(voteRows.map((vote) => vote.voterUserId))).toHaveLength(7);
-    expect(voteRows).toHaveLength(14);
+    expect(new Set(voteRows.map((vote) => vote.voterUserId))).toHaveLength(6);
+    expect(voteRows).toHaveLength(12);
     expect((await prisma.match.findUniqueOrThrow({ where: { id: match.id } })).status).toBe("VOTE_REPORTING");
 
-    const lastUserId = dummyVoteResult.leftUnvotedUserId!;
-    const lastPlayer = match.players.find((player) => player.userId === lastUserId)!;
-    const opponents = match.players.filter((player) => player.team !== lastPlayer.team);
-    await submitPlayerVotes(lastUserId, match.id, [
-      { targetUserId: opponents[0].userId, voteType: "STRONG" },
-      { targetUserId: opponents[1].userId, voteType: "WEAK" },
-    ]);
+    for (const realUserId of [realA.id, realB.id]) {
+      const realPlayer = match.players.find((player) => player.userId === realUserId)!;
+      const opponents = match.players.filter((player) => player.team !== realPlayer.team);
+      await submitPlayerVotes(realUserId, match.id, [
+        { targetUserId: opponents[0].userId, voteType: "STRONG" },
+        { targetUserId: opponents[1].userId, voteType: "WEAK" },
+      ]);
+    }
 
     const confirmed = await prisma.match.findUniqueOrThrow({
       where: { id: match.id },
@@ -143,6 +145,7 @@ describe("test dummies", () => {
       where: { tournamentId: tournament.id, isDummy: true },
     });
     expect(dummyAfter.every((dummy) => dummy.matchesPlayed === 1 && dummy.rating !== null)).toBe(true);
+    expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING", userId: { in: dummyAfter.map((dummy) => dummy.userId) } } })).toBe(6);
 
     voteRows = await prisma.playerVote.findMany({ where: { matchId: match.id } });
     for (const voterId of new Set(voteRows.map((vote) => vote.voterUserId))) {
@@ -151,5 +154,101 @@ describe("test dummies", () => {
       expect(new Set(votes.map((vote) => vote.voteType))).toEqual(new Set(["STRONG", "WEAK"]));
       expect(new Set(votes.map((vote) => vote.targetUserId))).toHaveLength(2);
     }
+  });
+
+  it("auto-queues 7 dummies for a requiredMatches=4 phase and matches them with one real waiting user", async () => {
+    const { admin, tournament } = await createConfiguredTournament(true);
+    await openRegistration(admin.id, tournament.id);
+
+    const real = await createUser(UserRole.PLAYER);
+    await joinTournament(real.id, tournament.id, { areaXp: 2500 });
+    const dummies = await addTestDummies(admin.id, admin.role, tournament.id, { count: 7, areaXp: 2500 });
+    createdUserIds.push(...dummies.map((dummy) => dummy.userId));
+    await startTournament(admin.id, tournament.id);
+
+    const phase = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.PENDING,
+        requiredMatchesPerPlayer: 4,
+        sortOrder: 1,
+      },
+    });
+    await startPhase(admin.id, phase.id);
+    await joinQueue(real.id, phase.id);
+
+    expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING" } })).toBe(8);
+
+    const matchmaking = await runMatchmaking(phase.id);
+    expect(matchmaking.matched).toBe(true);
+    if (!matchmaking.matched) return;
+
+    const match = await prisma.match.findUniqueOrThrow({
+      where: { id: matchmaking.matchId },
+      include: { players: true },
+    });
+    expect(match.players).toHaveLength(8);
+    expect(match.roomHostUserId).toBe(real.id);
+    expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING" } })).toBe(0);
+  });
+
+  it("fully automates an all-dummy test match and confirms rating", async () => {
+    const { admin, tournament } = await createConfiguredTournament(true);
+    await openRegistration(admin.id, tournament.id);
+    const dummies = await addTestDummies(admin.id, admin.role, tournament.id, { count: 8, areaXp: 2500 });
+    createdUserIds.push(...dummies.map((dummy) => dummy.userId));
+    await startTournament(admin.id, tournament.id);
+
+    const phase = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.ACTIVE,
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 1,
+      },
+    });
+    await queueTestDummies(admin.id, admin.role, tournament.id);
+    const matchmaking = await runMatchmaking(phase.id);
+    expect(matchmaking.matched).toBe(true);
+    if (!matchmaking.matched) return;
+
+    const automated = await fullyAutomateTestMatch(admin.id, admin.role, matchmaking.matchId);
+    expect(automated.status).toBe("CONFIRMED");
+    expect(automated.winnerTeam === "A" || automated.winnerTeam === "B").toBe(true);
+    expect(await prisma.playerVote.count({ where: { matchId: matchmaking.matchId } })).toBe(16);
+    expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING" } })).toBe(0);
+  });
+
+  it("rejects full automation for normal tournaments", async () => {
+    const { admin, tournament } = await createConfiguredTournament(false);
+    await openRegistration(admin.id, tournament.id);
+    const users = [];
+    for (let index = 0; index < 8; index += 1) {
+      const user = await createUser(UserRole.PLAYER);
+      users.push(user);
+      await joinTournament(user.id, tournament.id, { areaXp: 2500 + index });
+    }
+    await startTournament(admin.id, tournament.id);
+    const phase = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.ACTIVE,
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 1,
+      },
+    });
+    for (const user of users) {
+      await joinQueue(user.id, phase.id);
+    }
+    const matchmaking = await runMatchmaking(phase.id);
+    expect(matchmaking.matched).toBe(true);
+    if (!matchmaking.matched) return;
+
+    await expect(fullyAutomateTestMatch(admin.id, admin.role, matchmaking.matchId)).rejects.toThrow(
+      "Test dummy operations are allowed only for test tournaments.",
+    );
   });
 });

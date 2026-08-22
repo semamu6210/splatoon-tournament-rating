@@ -42,10 +42,15 @@ export function selectEightPlayers(waitingPlayers: WaitingPlayer[], now = new Da
   }
 
   const players = waitingPlayers.map(toMatchmakingPlayer);
-  const anchor = players.reduce((oldest, player) => (player.joinedAt < oldest.joinedAt ? player : oldest));
+  const minCompleted = Math.min(...players.map((player) => player.completedMatchesInPhase));
+  const leastPlayedPlayers = players.filter((player) => player.completedMatchesInPhase === minCompleted);
+  const anchor = leastPlayedPlayers.reduce((oldest, player) => (player.joinedAt < oldest.joinedAt ? player : oldest));
   const selectedCandidates = players
     .filter((player) => player.userId !== anchor.userId)
     .sort((a, b) => {
+      const completedDiff = a.completedMatchesInPhase - b.completedMatchesInPhase;
+      if (completedDiff !== 0) return completedDiff;
+
       const scoreDiff = scoreCandidate(anchor, a, now) - scoreCandidate(anchor, b, now);
       if (scoreDiff !== 0) return scoreDiff;
 
