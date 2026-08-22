@@ -15,6 +15,11 @@ const OPEN_MATCH_STATUSES: MatchStatus[] = [
   "RESULT_REPORTING",
   "VOTE_REPORTING",
 ];
+const RATING_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
 
 function assertTeam(value: unknown): Team {
   if (value !== "A" && value !== "B") {
@@ -355,12 +360,17 @@ async function applyRatingOnce(matchId: string) {
         xpTiers: match.ratingConfig.xpMultiplierTiers,
         winnerTeam: match.winnerTeam,
       });
+      const participants = await tx.tournamentParticipant.findMany({
+        where: {
+          tournamentId: match.tournamentId,
+          userId: { in: results.map((result) => result.userId) },
+        },
+      });
+      const participantByUserId = new Map(participants.map((participant) => [participant.userId, participant]));
 
       for (const result of results) {
         if (result.finalDelta.lt(0)) throw new ApiError(400, "finalDelta cannot be negative.");
-        const participant = await tx.tournamentParticipant.findUnique({
-          where: { tournamentId_userId: { tournamentId: match.tournamentId, userId: result.userId } },
-        });
+        const participant = participantByUserId.get(result.userId);
         if (!participant?.rating) throw new ApiError(400, "Participant rating is missing.");
         if (!new Prisma.Decimal(participant.rating).equals(result.ratingBefore)) {
           throw new ApiError(409, "Participant rating no longer matches MatchPlayer.ratingBefore.");
@@ -411,7 +421,7 @@ async function applyRatingOnce(matchId: string) {
         data: { status: "CONFIRMED" },
       });
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    RATING_TRANSACTION_OPTIONS,
   );
 }
 
@@ -423,6 +433,9 @@ export async function applyRating(matchId: string) {
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
       throw new ApiError(409, "Rating application conflicted with another request.");
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2028") {
+      throw new ApiError(503, "Rating application timed out. Please retry.");
     }
     throw error;
   }
