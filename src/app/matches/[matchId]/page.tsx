@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { AdminMatchActions } from "@/components/admin-match-actions";
+import { AutoRatingApplyTrigger } from "@/components/auto-rating-apply-trigger";
 import { ApiButton } from "@/components/api-button";
 import { AuthControls } from "@/components/auth-controls";
 import { MatchStatusRefresh } from "@/components/match-status-refresh";
@@ -194,6 +195,7 @@ export default async function MatchPage({ params }: PageProps) {
   return (
     <main className="min-h-screen px-5 py-8">
       <MatchStatusRefresh enabled={shouldAutoRefresh} />
+      <AutoRatingApplyTrigger enabled={ratingCalculationPending} matchId={match.id} />
       <section className="mx-auto grid max-w-4xl gap-6">
         <header className="flex flex-col gap-4 border-b border-zinc-300 pb-5">
           <Link className="text-sm text-zinc-600" href={`/tournaments/${match.tournamentId}`}>← 大会へ</Link>
