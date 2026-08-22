@@ -197,6 +197,79 @@ describe("test dummies", () => {
     expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING" } })).toBe(0);
   });
 
+  it("auto-closes voting and applies rating when one real user and seven dummies complete 8 votes", async () => {
+    const { admin, tournament } = await createConfiguredTournament(true);
+    await openRegistration(admin.id, tournament.id);
+
+    const real = await createUser(UserRole.PLAYER);
+    await joinTournament(real.id, tournament.id, { areaXp: 2500, participantName: "Real Player" });
+    const dummies = await addTestDummies(admin.id, admin.role, tournament.id, { count: 7, areaXp: 2500 });
+    createdUserIds.push(...dummies.map((dummy) => dummy.userId));
+    await startTournament(admin.id, tournament.id);
+
+    const phase = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.PENDING,
+        requiredMatchesPerPlayer: 4,
+        sortOrder: 1,
+      },
+    });
+    await startPhase(admin.id, phase.id);
+    await joinQueue(real.id, phase.id);
+
+    const matchmaking = await runMatchmaking(phase.id);
+    expect(matchmaking.matched).toBe(true);
+    if (!matchmaking.matched) return;
+
+    const match = await prisma.match.findUniqueOrThrow({
+      where: { id: matchmaking.matchId },
+      include: { players: true },
+    });
+    expect(match.players).toHaveLength(8);
+    expect(match.players.filter((player) => dummies.some((dummy) => dummy.userId === player.userId))).toHaveLength(7);
+
+    const realBefore = await prisma.tournamentParticipant.findUniqueOrThrow({
+      where: { tournamentId_userId: { tournamentId: tournament.id, userId: real.id } },
+    });
+
+    await startMatch(match.id);
+    await openResultReporting(match.id, real.id, UserRole.PLAYER);
+    await submitResultReport(real.id, match.id, "A", UserRole.PLAYER);
+
+    let voteRows = await prisma.playerVote.findMany({ where: { matchId: match.id } });
+    expect(new Set(voteRows.map((vote) => vote.voterUserId))).toHaveLength(7);
+    expect((await prisma.match.findUniqueOrThrow({ where: { id: match.id } })).status).toBe("VOTE_REPORTING");
+
+    const realPlayer = match.players.find((player) => player.userId === real.id)!;
+    const opponents = match.players.filter((player) => player.team !== realPlayer.team);
+    await submitPlayerVotes(real.id, match.id, [
+      { targetUserId: opponents[0].userId, voteType: "STRONG" },
+      { targetUserId: opponents[1].userId, voteType: "WEAK" },
+    ]);
+
+    const confirmed = await prisma.match.findUniqueOrThrow({
+      where: { id: match.id },
+      include: { players: true, ratingHistories: true },
+    });
+    expect(confirmed.status).toBe("CONFIRMED");
+    expect(confirmed.votingClosedAt).toBeInstanceOf(Date);
+    expect(confirmed.ratingAppliedAt).toBeInstanceOf(Date);
+    expect(confirmed.ratingHistories).toHaveLength(8);
+    expect(confirmed.players.every((player) => player.ratingAfter !== null)).toBe(true);
+
+    voteRows = await prisma.playerVote.findMany({ where: { matchId: match.id } });
+    expect(new Set(voteRows.map((vote) => vote.voterUserId))).toHaveLength(8);
+
+    const realAfter = await prisma.tournamentParticipant.findUniqueOrThrow({
+      where: { tournamentId_userId: { tournamentId: tournament.id, userId: real.id } },
+    });
+    const realHistory = confirmed.ratingHistories.find((history) => history.userId === real.id)!;
+    expect(realAfter.rating?.equals(realBefore.rating!.add(realHistory.finalDelta))).toBe(true);
+    expect(realAfter.rating?.equals(realBefore.rating!)).toBe(false);
+  });
+
   it("fully automates an all-dummy test match and confirms rating", async () => {
     const { admin, tournament } = await createConfiguredTournament(true);
     await openRegistration(admin.id, tournament.id);

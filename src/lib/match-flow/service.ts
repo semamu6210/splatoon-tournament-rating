@@ -220,6 +220,20 @@ async function getVotesForRating(tx: Tx, matchId: string, playerUserIds: string[
   return votes;
 }
 
+function getCompleteVoterIds(
+  playerUserIds: Iterable<string>,
+  votes: Array<{ voterUserId: string; voteType: VoteType }>,
+) {
+  const completeVoterIds = new Set<string>();
+  for (const userId of playerUserIds) {
+    const userVotes = votes.filter((vote) => vote.voterUserId === userId);
+    if (userVotes.some((vote) => vote.voteType === "STRONG") && userVotes.some((vote) => vote.voteType === "WEAK")) {
+      completeVoterIds.add(userId);
+    }
+  }
+  return completeVoterIds;
+}
+
 export async function closeVoting(adminUserId: string, matchId: string, reason: unknown) {
   if (typeof reason !== "string" || reason.trim().length === 0) {
     throw new ApiError(400, "reason is required.");
@@ -324,12 +338,16 @@ async function applyRatingOnce(matchId: string) {
       if (!match.winnerTeam) throw new ApiError(400, "winnerTeam is required.");
       validateMatchPlayers(match.players);
 
-      const votes = await getVotesForRating(
-        tx,
-        matchId,
-        match.players.map((player) => player.userId),
-        match.votingClosedAt,
-      );
+      const playerUserIds = match.players.map((player) => player.userId);
+      const votes = await getVotesForRating(tx, matchId, playerUserIds, match.votingClosedAt);
+      const completeVoterIds = getCompleteVoterIds(playerUserIds, votes);
+      const allPlayersVoted = match.players.length === 8 && completeVoterIds.size === 8;
+      if (!match.votingClosedAt && allPlayersVoted) {
+        await tx.match.update({
+          where: { id: matchId },
+          data: { votingClosedAt: new Date() },
+        });
+      }
       const results = calculatePlayerRatingResults({
         players: match.players,
         votes,
@@ -429,15 +447,9 @@ export async function attemptAutoApplyRatingForMatch(matchId: string) {
   if (!match) return { applied: false as const, reason: "MATCH_NOT_FOUND" as const };
 
   const playerUserIds = new Set(match.players.map((player) => player.userId));
-  const completeVoterIds = new Set<string>();
-  for (const userId of playerUserIds) {
-    const userVotes = match.playerVotes.filter((vote) => vote.voterUserId === userId);
-    if (userVotes.some((vote) => vote.voteType === "STRONG") && userVotes.some((vote) => vote.voteType === "WEAK")) {
-      completeVoterIds.add(userId);
-    }
-  }
+  const completeVoterIds = getCompleteVoterIds(playerUserIds, match.playerVotes);
 
-  const context = {
+  let context = {
     matchId,
     status: match.status,
     submittedVoterCount: completeVoterIds.size,
@@ -465,7 +477,39 @@ export async function attemptAutoApplyRatingForMatch(matchId: string) {
   }
 
   try {
+    if (allPlayersVoted && !match.votingClosedAt) {
+      const votingClosedAt = new Date();
+      const closed = await prisma.match.updateMany({
+        where: { id: matchId, status: "VOTE_REPORTING", ratingAppliedAt: null, votingClosedAt: null },
+        data: { votingClosedAt },
+      });
+      if (closed.count === 1) {
+        context = { ...context, votingClosedAt: votingClosedAt.toISOString() };
+        console.info("AUTO_RATING_VOTING_CLOSED", context);
+      }
+    }
+    console.info("AUTO_RATING_APPLY_STARTED", context);
     await applyRating(matchId);
+    const appliedMatch = await prisma.match.findUnique({
+      where: { id: matchId },
+      select: { tournamentId: true, status: true, votingClosedAt: true, ratingAppliedAt: true },
+    });
+    const ratingHistoryCount = await prisma.ratingHistory.count({ where: { matchId } });
+    const updatedParticipantCount = await prisma.tournamentParticipant.count({
+      where: {
+        tournamentId: appliedMatch?.tournamentId,
+        userId: { in: [...playerUserIds] },
+        matchesPlayed: { gt: 0 },
+      },
+    });
+    console.info("AUTO_RATING_APPLY_SUCCEEDED", {
+      ...context,
+      status: appliedMatch?.status ?? context.status,
+      votingClosedAt: appliedMatch?.votingClosedAt?.toISOString() ?? context.votingClosedAt,
+      ratingAppliedAt: appliedMatch?.ratingAppliedAt?.toISOString() ?? context.ratingAppliedAt,
+      ratingHistoryCount,
+      updatedParticipantCount,
+    });
     return { applied: true as const, ...context };
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) {
@@ -474,6 +518,7 @@ export async function attemptAutoApplyRatingForMatch(matchId: string) {
     console.error("AUTO_RATING_APPLY_FAILED", {
       ...context,
       errorCode: getAutoApplyErrorCode(error),
+      error: error instanceof Error ? error.message : String(error),
     });
     return { applied: false as const, reason: "APPLY_FAILED" as const, ...context };
   }

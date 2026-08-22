@@ -124,6 +124,13 @@ export default async function MatchPage({ params }: PageProps) {
     match.status === "VOTE_REPORTING" &&
     completeVoteSubmittedUserIds.size === 8 &&
     Boolean(match.winnerTeam) &&
+    !match.votingClosedAt &&
+    !match.ratingAppliedAt;
+  const ratingCalculationFailed =
+    match.status === "VOTE_REPORTING" &&
+    completeVoteSubmittedUserIds.size === 8 &&
+    Boolean(match.winnerTeam) &&
+    Boolean(match.votingClosedAt) &&
     !match.ratingAppliedAt;
   const imagePath = stageImagePath(match.stage?.name ?? match.stageName);
   const visibleImagePath = publicImageExists(imagePath) ? imagePath : null;
@@ -327,31 +334,72 @@ export default async function MatchPage({ params }: PageProps) {
               <p>投票完了: {completeVoteSubmittedUserIds.size} / 8</p>
               <p>投票受付: {match.votingClosedAt ? `締切済み (${match.votingClosedAt.toLocaleString("ja-JP")})` : "受付中"}</p>
             </div>
-            {ratingCalculationPending && <p className="text-sm font-semibold text-emerald-700">レートを計算しています...</p>}
+            {ratingCalculationPending && (
+              <div className="grid gap-1 text-sm font-semibold text-emerald-700">
+                <p>全員の投票が完了しました</p>
+                <p>レートを計算しています...</p>
+              </div>
+            )}
+            {ratingCalculationFailed && isAdmin && (
+              <div className="grid gap-3 rounded-md border border-red-300 bg-red-50 p-4 text-sm">
+                <p className="font-semibold text-red-700">レート計算に失敗しました</p>
+                <ApiButton url={`/api/matches/${match.id}/apply-rating`}>
+                  レート計算を再試行
+                </ApiButton>
+              </div>
+            )}
             {!match.votingClosedAt && !myVoteComplete && <PlayerVoteForm matchId={match.id} opponents={opponents} />}
-            {!match.votingClosedAt && myVoteComplete && <p className="text-sm text-zinc-600">他の参加者の投票を待っています。</p>}
+            {!match.votingClosedAt && myVoteComplete && !ratingCalculationPending && <p className="text-sm text-zinc-600">他の参加者の投票を待っています。</p>}
             {match.votingClosedAt && <p className="text-sm text-zinc-600">ADMINにより投票受付は締め切られました。</p>}
           </section>
         )}
 
-        {match.status === "CONFIRMED" && myHistory && (
+        {match.status === "CONFIRMED" && (
           <section className="rounded-md border border-zinc-300 bg-white p-4">
             <h2 className="text-lg font-semibold">試合終了</h2>
-            <dl className="mt-3 grid gap-2 text-sm">
-              <div>勝敗: {myPlayer && match.winnerTeam === myPlayer.team ? "勝利" : "敗北"}</div>
-              <div>試合前レート: {formatRating(myHistory.ratingBefore)}</div>
-              <div>今回の増加: +{formatRating(myHistory.finalDelta)}</div>
-              <div>現在レート: {formatRating(myParticipant?.rating ?? myHistory.ratingAfter)}</div>
-              <div>1票目を受けた数: {myHistory.strongVotesReceived}</div>
-              <div>2票目を受けた数: {myHistory.weakVotesReceived}</div>
-              <div>1票目でもらえるポイント: {formatRating(myHistory.strongVotePointsUsed)}</div>
-              <div>2票目でもらえるポイント: {formatRating(myHistory.weakVotePointsUsed)}</div>
-              <div>投票ポイント: +{formatRating(myHistory.votePoints)}</div>
-              <div>勝利ポイント: +{formatRating(myHistory.winBonusUsed)}</div>
-              <div>XP: {myHistory.areaXpUsed}</div>
-              <div>XP倍率: x{formatRating(myHistory.xpMultiplierUsed)}</div>
-              <div>試合後レート: {formatRating(myHistory.ratingAfter)}</div>
-            </dl>
+            <p className="mt-2 text-sm font-semibold text-emerald-700">レート計算が完了しました</p>
+            {myHistory && (
+              <dl className="mt-3 grid gap-2 text-sm">
+                <div>勝敗: {myPlayer && match.winnerTeam === myPlayer.team ? "勝利" : "敗北"}</div>
+                <div>試合前レート: {formatRating(myHistory.ratingBefore)}</div>
+                <div>今回の増加: +{formatRating(myHistory.finalDelta)}</div>
+                <div>現在レート: {formatRating(myParticipant?.rating ?? myHistory.ratingAfter)}</div>
+                <div>1票目を受けた数: {myHistory.strongVotesReceived}</div>
+                <div>2票目を受けた数: {myHistory.weakVotesReceived}</div>
+                <div>1票目でもらえるポイント: {formatRating(myHistory.strongVotePointsUsed)}</div>
+                <div>2票目でもらえるポイント: {formatRating(myHistory.weakVotePointsUsed)}</div>
+                <div>投票ポイント: +{formatRating(myHistory.votePoints)}</div>
+                <div>勝利ポイント: +{formatRating(myHistory.winBonusUsed)}</div>
+                <div>XP: {myHistory.areaXpUsed}</div>
+                <div>XP倍率: x{formatRating(myHistory.xpMultiplierUsed)}</div>
+                <div>試合後レート: {formatRating(myHistory.ratingAfter)}</div>
+              </dl>
+            )}
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-left text-sm">
+                <thead className="border-b border-zinc-200 text-zinc-600">
+                  <tr>
+                    <th className="py-2 pr-3 font-semibold">プレイヤー</th>
+                    <th className="py-2 pr-3 font-semibold">計算前レート</th>
+                    <th className="py-2 pr-3 font-semibold">今回の増加</th>
+                    <th className="py-2 pr-3 font-semibold">計算後レート</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {match.players.map((player) => {
+                    const history = match.ratingHistories.find((item) => item.userId === player.userId);
+                    return (
+                      <tr className="border-b border-zinc-100" key={player.userId}>
+                        <td className="py-2 pr-3">{playerLabel(player)}</td>
+                        <td className="py-2 pr-3">{formatRating(history?.ratingBefore ?? player.ratingBefore)}</td>
+                        <td className="py-2 pr-3">+{formatRating(history?.finalDelta ?? null)}</td>
+                        <td className="py-2 pr-3">{formatRating(history?.ratingAfter ?? player.ratingAfter)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
             <Link className="mt-4 inline-flex rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white" href={`/tournaments/${match.tournamentId}`}>
               次のマッチングへ
             </Link>

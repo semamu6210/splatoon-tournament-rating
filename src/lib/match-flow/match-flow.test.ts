@@ -245,6 +245,7 @@ describe("result reports and rating application", () => {
     });
     expect(confirmed.status).toBe("CONFIRMED");
     expect(confirmed.ratingAppliedAt).toBeInstanceOf(Date);
+    expect(confirmed.votingClosedAt).toBeInstanceOf(Date);
     expect(confirmed.ratingHistories).toHaveLength(8);
     expect(confirmed.players.every((player) => player.ratingAfter !== null)).toBe(true);
     expect(confirmed.ratingHistories.every((history) => history.ratingConfigVersionUsed === 1)).toBe(true);
@@ -298,6 +299,19 @@ describe("result reports and rating application", () => {
     expect(histories).toBe(0);
     expect(reloaded.status).toBe("VOTE_REPORTING");
     expect(reloaded.ratingAppliedAt).toBeNull();
+    expect(reloaded.votingClosedAt).toBeInstanceOf(Date);
+
+    await prisma.tournamentParticipant.update({
+      where: { tournamentId_userId: { tournamentId: match.tournamentId, userId: first.userId } },
+      data: { rating: first.ratingBefore },
+    });
+    const retried = await applyRating(match.id);
+    expect(retried.status).toBe("CONFIRMED");
+    expect(retried.ratingAppliedAt).toBeInstanceOf(Date);
+    expect(retried.votingClosedAt).toBeInstanceOf(Date);
+    expect(await prisma.ratingHistory.count({ where: { matchId: match.id } })).toBe(8);
+    await expect(applyRating(match.id)).rejects.toThrow("Rating has already been applied or match is not ready.");
+    expect(await prisma.ratingHistory.count({ where: { matchId: match.id } })).toBe(8);
   });
 
   it("allows only one concurrent apply to persist", async () => {
@@ -341,7 +355,7 @@ describe("result reports and rating application", () => {
     const votes = await prisma.playerVote.findMany({ where: { matchId: match.id } });
     expect(reloaded.status).toBe("CONFIRMED");
     expect(reloaded.ratingAppliedAt).toBeInstanceOf(Date);
-    expect(reloaded.votingClosedAt).toBeNull();
+    expect(reloaded.votingClosedAt).toBeInstanceOf(Date);
     expect(votes).toHaveLength(16);
     expect(new Set(votes.map((vote) => vote.voterUserId))).toHaveLength(8);
     expect(await prisma.ratingHistory.count({ where: { matchId: match.id } })).toBe(8);
