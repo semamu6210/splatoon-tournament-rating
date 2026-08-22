@@ -10,6 +10,7 @@ import { RatingConfigForm } from "@/components/rating-config-form";
 import { RankingTabs } from "@/components/ranking-tabs";
 import { TournamentDeleteButton } from "@/components/tournament-delete-button";
 import { TournamentForm } from "@/components/tournament-form";
+import { TestDummyPanel } from "@/components/test-dummy-panel";
 import { auth } from "@/auth";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -42,6 +43,7 @@ function plainRankingRow(row: Awaited<ReturnType<typeof getTournamentRankings>>[
     streakBadge: row.streakBadge,
     finalRank: row.finalRank,
     advancedToMainEvent: row.advancedToMainEvent,
+    isDummy: row.isDummy,
     currentPhase: row.currentPhase,
   };
 }
@@ -232,16 +234,25 @@ export default async function AdminTournamentPage({ params }: PageProps) {
           <TournamentForm
             initialEndsAt={tournament.endsAt?.toISOString() ?? null}
             initialName={tournament.name}
+            initialIsTestTournament={tournament.isTestTournament}
             initialRankingVisibility={tournament.rankingVisibility}
             initialStagePoolEnabled={tournament.stagePoolEnabled}
             initialStageNames={tournament.stages.map((stage) => stage.name)}
             initialStartsAt={tournament.startsAt?.toISOString() ?? null}
+            canEditTestTournament={tournament.status === "DRAFT"}
             mode="edit"
             tournamentId={tournament.id}
           />
         </section>
 
         <TournamentDeleteButton tournamentId={tournament.id} tournamentName={tournament.name} />
+
+        {tournament.isTestTournament && (
+          <TestDummyPanel
+            canDelete={tournament.status === "DRAFT" || tournament.status === "REGISTRATION"}
+            tournamentId={tournament.id}
+          />
+        )}
 
         <section className="rounded-md border border-zinc-300 bg-white p-4">
           <h2 className="text-xl font-semibold">運営ダッシュボード</h2>
@@ -349,7 +360,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                     .map((participant) => ({
                       id: participant.id,
                       userId: participant.userId,
-                      label: participant.user.discordUsername ?? participant.user.name ?? participant.userId,
+                      label: `${participant.participantName}${participant.isDummy ? "（テスト参加者）" : ""}`,
                     }))}
                   phaseId={phase.id}
                   phaseStatus={phase.status}
@@ -423,6 +434,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                   <tr className="border-t border-zinc-200" key={participant.id}>
                     <td className="px-3 py-2">
                       {participant.participantName}{" "}
+                      {participant.isDummy && <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">テスト参加者</span>}{" "}
                       {participant.winningStreak >= 3
                         ? `🔥 ${participant.winningStreak}連勝`
                         : participant.losingStreak >= 3

@@ -59,6 +59,7 @@ export async function getMatchViewForUser(matchId: string, user: AuthenticatedUs
       userId: player.userId,
       user: player.user,
       participantName: participant?.participantName ?? player.user.discordUsername ?? player.user.name ?? player.userId,
+      isDummy: participant?.isDummy ?? false,
       team: player.team,
       ratingBefore: serializeDecimal(player.ratingBefore),
       areaXpAtMatch: player.areaXpAtMatch,

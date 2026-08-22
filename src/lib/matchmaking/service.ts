@@ -270,6 +270,7 @@ async function getWaitingPlayers(tx: Tx, phaseId: string, losingStreakPenalty: P
       losingStreak: participant.losingStreak,
       losingStreakPenalty,
       areaXp: participant.areaXp,
+      isDummy: participant.isDummy,
       recentOpponentIds: relation?.opponents ?? new Set(),
       recentTeammateIds: relation?.teammates ?? new Set(),
     });
@@ -308,7 +309,8 @@ async function generateAvailablePrivateRoomCode(tx: Tx) {
 }
 
 async function selectRoomHostUserId(tx: Tx, players: MatchmakingPlayer[]) {
-  const userIds = players.map((player) => player.userId);
+  const hostCandidates = players.some((player) => !player.isDummy) ? players.filter((player) => !player.isDummy) : players;
+  const userIds = hostCandidates.map((player) => player.userId);
   const hostCounts = await tx.match.groupBy({
     by: ["roomHostUserId"],
     where: { roomHostUserId: { in: userIds } },

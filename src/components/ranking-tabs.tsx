@@ -15,6 +15,7 @@ type RankingRow = {
   matchesPlayed: number;
   areaXp: number;
   participantName: string;
+  isDummy: boolean;
   winningStreak: number;
   losingStreak: number;
   streakBadge: string | null;
@@ -42,6 +43,10 @@ type RankingTabsProps = {
 
 function playerLabel(row: RankingRow) {
   return row.participantName ?? row.discordUsername ?? row.playerName ?? row.userId;
+}
+
+function DummyBadge({ show }: { show: boolean }) {
+  return show ? <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">テスト参加者</span> : null;
 }
 
 export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingTabsProps) {
@@ -78,7 +83,7 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-semibold">
-                  {row.rank}位 {playerLabel(row)}
+                  {row.rank}位 {playerLabel(row)} <DummyBadge show={row.isDummy} />
                 </p>
                 <p className="mt-1 text-zinc-600">
                   現在レート {row.rating} / {row.wins}勝{row.losses}敗
@@ -124,7 +129,7 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
               <tr className="border-t border-zinc-200" key={row.userId}>
                 <td className="px-3 py-2">{row.rank}</td>
                 <td className="px-3 py-2">
-                  {playerLabel(row)}{" "}
+                  {playerLabel(row)} <DummyBadge show={row.isDummy} />{" "}
                   {row.streakBadge && (
                     <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={row.streakBadge} type="button">
                       {row.streakBadge}

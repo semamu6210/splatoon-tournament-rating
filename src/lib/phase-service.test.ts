@@ -116,6 +116,8 @@ describe("competition rankings", () => {
       advancedToMainEvent: false,
       finalRank: null,
       isActive: true,
+      isDummy: false,
+      dummyName: null,
       joinedAt: new Date("2026-08-22T00:00:00Z"),
       createdAt: new Date("2026-08-22T00:00:00Z"),
       updatedAt: new Date("2026-08-22T00:00:00Z"),

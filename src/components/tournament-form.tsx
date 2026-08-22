@@ -15,6 +15,8 @@ type TournamentFormProps = {
   initialRankingVisibility?: "OWN_BLOCK_ONLY" | "OWN_AND_OTHER_BLOCKS" | "OVERALL_ONLY" | "ALL";
   initialStagePoolEnabled?: boolean;
   initialStageNames?: string[];
+  initialIsTestTournament?: boolean;
+  canEditTestTournament?: boolean;
 };
 
 function toInputDateTime(value?: string | null) {
@@ -31,11 +33,14 @@ export function TournamentForm({
   initialRankingVisibility = "ALL",
   initialStagePoolEnabled = true,
   initialStageNames = DEFAULT_STAGE_NAMES.slice(0, 4),
+  initialIsTestTournament = false,
+  canEditTestTournament = mode === "create",
 }: TournamentFormProps) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [stagePoolEnabled, setStagePoolEnabled] = useState(initialStagePoolEnabled);
   const [stageNames, setStageNames] = useState<string[]>(initialStageNames);
+  const [isTestTournament, setIsTestTournament] = useState(initialIsTestTournament);
   const [pending, setPending] = useState(false);
 
   function toggleStage(name: string) {
@@ -55,6 +60,7 @@ export function TournamentForm({
       rankingVisibility: form.get("rankingVisibility"),
       stagePoolEnabled,
       stageNames: stagePoolEnabled ? stageNames : undefined,
+      isTestTournament,
     };
 
     const response = await fetch(mode === "create" ? "/api/tournaments" : `/api/tournaments/${tournamentId}`, {
@@ -151,6 +157,16 @@ export function TournamentForm({
           </>
         )}
       </fieldset>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          checked={isTestTournament}
+          className="size-4"
+          disabled={!canEditTestTournament}
+          onChange={(event) => setIsTestTournament(event.target.checked)}
+          type="checkbox"
+        />
+        テスト大会
+      </label>
       <button className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-zinc-400" disabled={pending}>
         {pending ? "保存中..." : "保存"}
       </button>

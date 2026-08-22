@@ -18,6 +18,7 @@ export type RankingRow = {
   matchesPlayed: number;
   areaXp: number;
   participantName: string;
+  isDummy: boolean;
   winningStreak: number;
   losingStreak: number;
   streakBadge: string | null;
@@ -92,6 +93,7 @@ export function assignCompetitionRanks(participants: RankedParticipant[]): Ranki
       matchesPlayed: participant.matchesPlayed,
       areaXp: participant.areaXp,
       participantName: participant.participantName,
+      isDummy: participant.isDummy,
       winningStreak: participant.winningStreak,
       losingStreak: participant.losingStreak,
       streakBadge:

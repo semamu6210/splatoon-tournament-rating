@@ -19,6 +19,7 @@ export type TournamentInput = {
   rankingVisibility?: unknown;
   stagePoolEnabled?: unknown;
   stageNames?: unknown;
+  isTestTournament?: unknown;
 };
 
 export function normalizeTournamentInput(input: TournamentInput) {
@@ -45,6 +46,7 @@ export function normalizeTournamentInput(input: TournamentInput) {
       input.rankingVisibility === "ALL"
         ? input.rankingVisibility
         : undefined) as RankingVisibility | undefined,
+    isTestTournament: input.isTestTournament === true || input.isTestTournament === "true",
   };
 }
 
@@ -83,7 +85,7 @@ export async function createTournament(adminUserId: string, input: TournamentInp
 
 export async function updateTournament(adminUserId: string, tournamentId: string, input: TournamentInput) {
   const data = normalizeTournamentInput(input);
-  const { stageNames, stagePoolEnabled, ...tournamentData } = data;
+  const { stageNames, stagePoolEnabled, isTestTournament, ...tournamentData } = data;
 
   return prisma.$transaction(async (tx) => {
     const before = await tx.tournament.findUnique({ where: { id: tournamentId } });
@@ -99,7 +101,10 @@ export async function updateTournament(adminUserId: string, tournamentId: string
 
     await tx.tournament.update({
       where: { id: tournamentId },
-      data: tournamentData,
+        data: {
+          ...tournamentData,
+          ...(before.status === TournamentStatus.DRAFT ? { isTestTournament } : {}),
+        },
     });
     let stagesAfter = stagesBefore;
     if (stagePoolEnabled !== undefined) {
@@ -120,6 +125,7 @@ export async function updateTournament(adminUserId: string, tournamentId: string
             startsAt: before.startsAt?.toISOString() ?? null,
             endsAt: before.endsAt?.toISOString() ?? null,
             stageNames: stagesBefore.map((stage) => stage.name),
+            isTestTournament: before.isTestTournament,
           },
           after: {
             name: after.name,
@@ -127,6 +133,7 @@ export async function updateTournament(adminUserId: string, tournamentId: string
             endsAt: after.endsAt?.toISOString() ?? null,
             stagePoolEnabled: stagePoolEnabled ?? before.stagePoolEnabled,
             stageNames: stagesAfter.map((stage) => stage.name),
+            isTestTournament: after.isTestTournament,
           },
         },
       },

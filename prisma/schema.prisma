@@ -100,6 +100,7 @@ model Tournament {
   updatedAt                DateTime                @updatedAt
   rankingVisibility        RankingVisibility       @default(ALL)
   stagePoolEnabled         Boolean                 @default(false)
+  isTestTournament         Boolean                 @default(false)
   matches                  Match[]
   queueEntries             QueueEntry[]
   ratingHistories          RatingHistory[]
@@ -233,6 +234,8 @@ model TournamentParticipant {
   advancedToMainEvent        Boolean                      @default(false)
   participantName            String
   winningStreak              Int                          @default(0)
+  isDummy                    Boolean                      @default(false)
+  dummyName                  String?
   blockParticipations        TournamentBlockParticipant[]
   initialRatingConfig        TournamentRatingConfig?      @relation("ParticipantInitialRatingConfig", fields: [initialRatingConfigId], references: [id])
   tournament                 Tournament                   @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
@@ -245,6 +248,7 @@ model TournamentParticipant {
   @@index([rating])
   @@index([tournamentId, blockName, rating])
   @@index([tournamentId, advancedToMainEvent])
+  @@index([tournamentId, isDummy])
 }
 
 model TournamentRatingConfig {

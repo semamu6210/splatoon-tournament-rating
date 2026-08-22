@@ -8,6 +8,7 @@ export type WaitingPlayer = {
   losingStreak: number;
   losingStreakPenalty: Prisma.Decimal;
   areaXp: number;
+  isDummy: boolean;
   recentOpponentIds: Set<string>;
   recentTeammateIds: Set<string>;
 };

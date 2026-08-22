@@ -7,9 +7,10 @@ type AdminMatchActionsProps = {
   matchId: string;
   stages?: Array<{ id: string; name: string }>;
   currentStageId?: string | null;
+  isTestTournament?: boolean;
 };
 
-export function AdminMatchActions({ matchId, stages = [], currentStageId = null }: AdminMatchActionsProps) {
+export function AdminMatchActions({ matchId, stages = [], currentStageId = null, isTestTournament = false }: AdminMatchActionsProps) {
   const router = useRouter();
   const [winner, setWinner] = useState<"A" | "B">("A");
   const [stageId, setStageId] = useState(currentStageId ?? "");
@@ -100,6 +101,16 @@ export function AdminMatchActions({ matchId, stages = [], currentStageId = null 
           Matchキャンセル
         </button>
       </div>
+      {isTestTournament && (
+        <div className="grid gap-2 border-t border-zinc-200 pt-3">
+          <button className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold" onClick={() => void post(`/api/admin/matches/${matchId}/test-dummy-votes`)} type="button">
+            ダミーの投票を自動提出
+          </button>
+          <button className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold" onClick={() => void post(`/api/admin/matches/${matchId}/test-dummy-votes`, { leaveOneRealUserUnvoted: true })} type="button">
+            7/8状態を作る
+          </button>
+        </div>
+      )}
       {message && <p className="text-sm text-zinc-700">{message}</p>}
     </div>
   );

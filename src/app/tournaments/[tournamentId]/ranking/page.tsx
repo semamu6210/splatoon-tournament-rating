@@ -25,6 +25,7 @@ function plainRankingRow(row: Awaited<ReturnType<typeof getTournamentRankings>>[
     matchesPlayed: row.matchesPlayed,
     areaXp: row.areaXp,
     participantName: row.participantName,
+    isDummy: row.isDummy,
     winningStreak: row.winningStreak,
     losingStreak: row.losingStreak,
     streakBadge: row.streakBadge,

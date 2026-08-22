@@ -92,6 +92,7 @@ function waitingPlayer(params: {
     losingStreak: 0,
     losingStreakPenalty: new Prisma.Decimal(20),
     areaXp: 2500,
+    isDummy: false,
     recentOpponentIds: new Set(params.opponents ?? []),
     recentTeammateIds: new Set(params.teammates ?? []),
   };

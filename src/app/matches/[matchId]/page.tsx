@@ -44,7 +44,7 @@ export default async function MatchPage({ params }: PageProps) {
       resultReports: true,
       playerVotes: true,
       ratingHistories: true,
-      tournament: { select: { name: true } },
+      tournament: { select: { name: true, isTestTournament: true } },
       stage: true,
       phase: { select: { phaseType: true, rule: true } },
       roomHost: { select: { id: true, name: true, discordUsername: true } },
@@ -104,7 +104,7 @@ export default async function MatchPage({ params }: PageProps) {
         .filter((player) => player.team !== myPlayer.team)
         .map((player) => ({
           userId: player.userId,
-          label: player.user.discordUsername ?? player.user.name ?? player.userId,
+          label: `${participantByUserId.get(player.userId)?.participantName ?? player.user.discordUsername ?? player.user.name ?? player.userId}${participantByUserId.get(player.userId)?.isDummy ? "（テスト参加者）" : ""}`,
         }))
     : [];
   const myHistory = user ? match.ratingHistories.find((history) => history.userId === user.id) : null;
@@ -142,6 +142,7 @@ export default async function MatchPage({ params }: PageProps) {
       <li className="rounded-md bg-zinc-50 p-3 text-sm" key={player.id}>
         <p className="font-semibold">
           {playerLabel(player)}{" "}
+          {participant?.isDummy && <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">テスト参加者</span>}{" "}
           {badge && (
             <button className="rounded bg-zinc-100 px-2 py-1 text-xs" title={badge} type="button">
               {badge}
@@ -346,7 +347,7 @@ export default async function MatchPage({ params }: PageProps) {
 
         {isAdmin && (
           <>
-            <AdminMatchActions currentStageId={match.stageId} matchId={match.id} stages={stages} />
+            <AdminMatchActions currentStageId={match.stageId} isTestTournament={match.tournament.isTestTournament} matchId={match.id} stages={stages} />
             <section className="rounded-md border border-zinc-300 bg-white p-4">
               <h2 className="text-lg font-semibold">ADMIN確認</h2>
               <div className="mt-3 grid gap-2 text-sm">
