@@ -22,8 +22,12 @@ function combinations<T>(items: T[], size: number) {
   return result;
 }
 
-function sumRating(players: MatchmakingPlayer[]) {
-  return players.reduce((sum, player) => sum.add(player.matchingRating), new Prisma.Decimal(0));
+function sumMatchingPower(players: MatchmakingPlayer[]) {
+  return players.reduce((sum, player) => sum.add(player.matchingPower), new Prisma.Decimal(0));
+}
+
+function averageXp(players: MatchmakingPlayer[]) {
+  return players.reduce((sum, player) => sum + player.areaXp, 0) / players.length;
 }
 
 function teammateRepeatPenalty(team: MatchmakingPlayer[]) {
@@ -57,18 +61,22 @@ export function splitIntoBalancedTeams(players: MatchmakingPlayer[]): TeamAssign
     const teamA = [first, ...combination];
     const teamAIds = new Set(teamA.map((player) => player.userId));
     const teamB = players.filter((player) => !teamAIds.has(player.userId));
-    const ratingDifference = sumRating(teamA).sub(sumRating(teamB)).abs();
+    const matchingPowerDifference = sumMatchingPower(teamA).sub(sumMatchingPower(teamB)).abs();
+    const averageXpDifference = Math.abs(averageXp(teamA) - averageXp(teamB));
     const repeatPenalty = teammateRepeatPenalty(teamA) + teammateRepeatPenalty(teamB);
 
     if (
       !best ||
-      ratingDifference.lt(best.ratingDifference) ||
-      (ratingDifference.equals(best.ratingDifference) && repeatPenalty < best.teammateRepeatPenalty)
+      matchingPowerDifference.lt(best.matchingPowerDifference) ||
+      (matchingPowerDifference.equals(best.matchingPowerDifference) &&
+        (averageXpDifference < best.averageXpDifference ||
+          (averageXpDifference === best.averageXpDifference && repeatPenalty < best.teammateRepeatPenalty)))
     ) {
       best = {
         teamA,
         teamB,
-        ratingDifference,
+        matchingPowerDifference,
+        averageXpDifference,
         teammateRepeatPenalty: repeatPenalty,
       };
     }

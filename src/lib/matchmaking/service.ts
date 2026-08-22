@@ -235,7 +235,7 @@ async function recentRelations(tx: Tx, userIds: string[], phaseId: string) {
   return relations;
 }
 
-async function getWaitingPlayers(tx: Tx, phaseId: string, requiredMatchesPerPlayer: number, losingStreakPenalty: Prisma.Decimal) {
+async function getWaitingPlayers(tx: Tx, phaseId: string, requiredMatchesPerPlayer: number) {
   const entries = await tx.queueEntry.findMany({
     where: { phaseId, status: QueueStatus.WAITING },
     include: {
@@ -279,7 +279,6 @@ async function getWaitingPlayers(tx: Tx, phaseId: string, requiredMatchesPerPlay
       joinedAt: entry.joinedAt,
       rating: participant.rating,
       losingStreak: participant.losingStreak,
-      losingStreakPenalty,
       areaXp: participant.areaXp,
       isDummy: participant.isDummy,
       completedMatchesInPhase,
@@ -396,7 +395,7 @@ export async function runMatchmaking(phaseId: string) {
         return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
       }
 
-      const waitingPlayers = await getWaitingPlayers(tx, phaseId, phase.requiredMatchesPerPlayer, activeConfig.losingStreakPenalty);
+      const waitingPlayers = await getWaitingPlayers(tx, phaseId, phase.requiredMatchesPerPlayer);
       const selected = selectEightPlayers(waitingPlayers);
 
       if (!selected) {
@@ -455,7 +454,7 @@ export async function runMatchmaking(phaseId: string) {
             userId: player.userId,
             team: "A" as const,
             ratingBefore: player.rating,
-            matchingRatingAtMatch: player.matchingRating,
+            matchingRatingAtMatch: player.matchingPower,
             areaXpAtMatch: player.areaXp,
             losingStreakAtMatch: player.losingStreak,
             ratingAfter: null,
@@ -465,7 +464,7 @@ export async function runMatchmaking(phaseId: string) {
             userId: player.userId,
             team: "B" as const,
             ratingBefore: player.rating,
-            matchingRatingAtMatch: player.matchingRating,
+            matchingRatingAtMatch: player.matchingPower,
             areaXpAtMatch: player.areaXp,
             losingStreakAtMatch: player.losingStreak,
             ratingAfter: null,

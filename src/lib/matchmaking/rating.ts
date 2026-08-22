@@ -1,12 +1,13 @@
 import { Prisma } from "@prisma/client";
 
-export function calculateMatchingRating(params: {
-  rating: Prisma.Decimal.Value;
-  losingStreak: number;
-  losingStreakPenalty: Prisma.Decimal.Value;
-}) {
-  const rating = new Prisma.Decimal(params.rating);
-  const penalty = new Prisma.Decimal(params.losingStreakPenalty).mul(params.losingStreak);
+export const LOSING_STREAK_MATCHING_POWER_PENALTY = 50;
 
-  return rating.sub(penalty);
+export function calculateMatchingPower(params: {
+  areaXp: number;
+  losingStreak: number;
+}) {
+  const areaXp = new Prisma.Decimal(params.areaXp);
+  const penalty = new Prisma.Decimal(LOSING_STREAK_MATCHING_POWER_PENALTY).mul(params.losingStreak);
+
+  return areaXp.sub(penalty);
 }

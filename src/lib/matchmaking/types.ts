@@ -6,7 +6,6 @@ export type WaitingPlayer = {
   joinedAt: Date;
   rating: Prisma.Decimal;
   losingStreak: number;
-  losingStreakPenalty: Prisma.Decimal;
   areaXp: number;
   isDummy: boolean;
   completedMatchesInPhase: number;
@@ -15,12 +14,13 @@ export type WaitingPlayer = {
 };
 
 export type MatchmakingPlayer = WaitingPlayer & {
-  matchingRating: Prisma.Decimal;
+  matchingPower: Prisma.Decimal;
 };
 
 export type TeamAssignment = {
   teamA: MatchmakingPlayer[];
   teamB: MatchmakingPlayer[];
-  ratingDifference: Prisma.Decimal;
+  matchingPowerDifference: Prisma.Decimal;
+  averageXpDifference: number;
   teammateRepeatPenalty: number;
 };

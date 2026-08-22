@@ -190,6 +190,10 @@ describe("test dummies", () => {
     });
     expect(match.players).toHaveLength(8);
     expect(match.roomHostUserId).toBe(real.id);
+    const dummyUserIds = new Set(dummies.map((dummy) => dummy.userId));
+    const dummyMatchPlayers = match.players.filter((player) => dummyUserIds.has(player.userId));
+    expect(dummyMatchPlayers).toHaveLength(7);
+    expect(dummyMatchPlayers.every((player) => player.matchingRatingAtMatch.toString() === String(player.areaXpAtMatch - player.losingStreakAtMatch * 50))).toBe(true);
     expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING" } })).toBe(0);
   });
 

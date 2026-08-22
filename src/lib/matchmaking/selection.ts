@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { MATCHMAKING_CONFIG } from "@/lib/matchmaking/config";
-import { calculateMatchingRating } from "@/lib/matchmaking/rating";
+import { calculateMatchingPower } from "@/lib/matchmaking/rating";
 import type { MatchmakingPlayer, WaitingPlayer } from "@/lib/matchmaking/types";
 
 function waitingMinutes(joinedAt: Date, now: Date) {
@@ -9,29 +9,28 @@ function waitingMinutes(joinedAt: Date, now: Date) {
 }
 
 function scoreCandidate(anchor: MatchmakingPlayer, candidate: MatchmakingPlayer, now: Date) {
-  const ratingDifference = anchor.matchingRating.sub(candidate.matchingRating).abs().toNumber();
+  const powerDifference = anchor.matchingPower.sub(candidate.matchingPower).abs().toNumber();
   const anchorWait = waitingMinutes(anchor.joinedAt, now);
   const candidateWait = waitingMinutes(candidate.joinedAt, now);
   const rangeAllowance =
     MATCHMAKING_CONFIG.BASE_RATING_RANGE +
     anchorWait * MATCHMAKING_CONFIG.RANGE_EXPANSION_PER_MINUTE;
-  const outsideRangePenalty = Math.max(0, ratingDifference - rangeAllowance);
+  const outsideRangePenalty = Math.max(0, powerDifference - rangeAllowance);
   const rematchPenalty =
     anchor.recentOpponentIds.has(candidate.userId) || candidate.recentOpponentIds.has(anchor.userId)
       ? MATCHMAKING_CONFIG.REMATCH_PENALTY
       : 0;
   const waitingAdjustment = candidateWait * MATCHMAKING_CONFIG.WAITING_SCORE_REDUCTION_PER_MINUTE;
 
-  return outsideRangePenalty + ratingDifference + rematchPenalty - waitingAdjustment;
+  return outsideRangePenalty + powerDifference - waitingAdjustment + rematchPenalty;
 }
 
 export function toMatchmakingPlayer(player: WaitingPlayer): MatchmakingPlayer {
   return {
     ...player,
-    matchingRating: calculateMatchingRating({
-      rating: player.rating,
+    matchingPower: calculateMatchingPower({
+      areaXp: player.areaXp,
       losingStreak: player.losingStreak,
-      losingStreakPenalty: player.losingStreakPenalty,
     }),
   };
 }
@@ -54,10 +53,10 @@ export function selectEightPlayers(waitingPlayers: WaitingPlayer[], now = new Da
       const scoreDiff = scoreCandidate(anchor, a, now) - scoreCandidate(anchor, b, now);
       if (scoreDiff !== 0) return scoreDiff;
 
-      const ratingDiff = anchor.matchingRating.sub(a.matchingRating).abs().cmp(
-        anchor.matchingRating.sub(b.matchingRating).abs(),
+      const powerDiff = anchor.matchingPower.sub(a.matchingPower).abs().cmp(
+        anchor.matchingPower.sub(b.matchingPower).abs(),
       );
-      if (ratingDiff !== 0) return ratingDiff;
+      if (powerDiff !== 0) return powerDiff;
 
       return a.joinedAt.getTime() - b.joinedAt.getTime();
     })

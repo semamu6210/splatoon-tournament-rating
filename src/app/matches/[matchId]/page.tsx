@@ -161,6 +161,12 @@ export default async function MatchPage({ params }: PageProps) {
             <p className="mt-1 text-zinc-600">
               公開レート: {formatRating(participant?.rating ?? player.ratingBefore)} / {participant?.wins ?? 0}勝{participant?.losses ?? 0}敗
             </p>
+            {isAdmin && (
+              <p className="mt-1 text-xs text-zinc-600">
+                エリアXP: {player.areaXpAtMatch} / 連敗数: {player.losingStreakAtMatch} / 内部マッチング値:{" "}
+                {formatRating(player.matchingRatingAtMatch)}
+              </p>
+            )}
           </div>
         </div>
         {showRecent && (

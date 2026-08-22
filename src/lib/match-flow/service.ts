@@ -410,6 +410,13 @@ export async function applyRating(matchId: string) {
   }
 }
 
+function getAutoApplyErrorCode(error: unknown) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) return error.code;
+  if (error instanceof ApiError) return `API_${error.status}`;
+  if (error instanceof Error) return error.name;
+  return "UNKNOWN";
+}
+
 export async function attemptAutoApplyRatingForMatch(matchId: string) {
   const match = await prisma.match.findUnique({
     where: { id: matchId },
@@ -434,9 +441,12 @@ export async function attemptAutoApplyRatingForMatch(matchId: string) {
     matchId,
     status: match.status,
     submittedVoterCount: completeVoterIds.size,
+    votingClosedAt: match.votingClosedAt?.toISOString() ?? null,
     winnerTeam: match.winnerTeam,
     ratingAppliedAt: match.ratingAppliedAt?.toISOString() ?? null,
   };
+  const allPlayersVoted = match.players.length === 8 && completeVoterIds.size === 8;
+  const canApplyRating = allPlayersVoted || match.votingClosedAt !== null;
 
   if (match.status !== "VOTE_REPORTING") {
     return { applied: false as const, reason: "STATUS_NOT_READY" as const, ...context };
@@ -450,7 +460,7 @@ export async function attemptAutoApplyRatingForMatch(matchId: string) {
   if (match.players.length !== 8) {
     return { applied: false as const, reason: "PLAYER_COUNT_NOT_READY" as const, ...context };
   }
-  if (completeVoterIds.size !== 8) {
+  if (!canApplyRating) {
     return { applied: false as const, reason: "VOTES_INCOMPLETE" as const, ...context };
   }
 
@@ -463,7 +473,7 @@ export async function attemptAutoApplyRatingForMatch(matchId: string) {
     }
     console.error("AUTO_RATING_APPLY_FAILED", {
       ...context,
-      error: error instanceof Error ? error.message : String(error),
+      errorCode: getAutoApplyErrorCode(error),
     });
     return { applied: false as const, reason: "APPLY_FAILED" as const, ...context };
   }

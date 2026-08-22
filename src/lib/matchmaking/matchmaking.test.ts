@@ -1,7 +1,7 @@
 import { Prisma, TournamentPhaseStatus, UserRole } from "@prisma/client";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { calculateMatchingRating } from "@/lib/matchmaking/rating";
+import { calculateMatchingPower } from "@/lib/matchmaking/rating";
 import { selectEightPlayers } from "@/lib/matchmaking/selection";
 import { splitIntoBalancedTeams } from "@/lib/matchmaking/team";
 import type { WaitingPlayer } from "@/lib/matchmaking/types";
@@ -79,7 +79,9 @@ async function createActiveTournamentWithPhase(playerCount: number) {
 
 function waitingPlayer(params: {
   userId: string;
-  rating: string;
+  rating?: string;
+  areaXp?: number;
+  losingStreak?: number;
   joinedAt: Date;
   opponents?: string[];
   teammates?: string[];
@@ -88,10 +90,9 @@ function waitingPlayer(params: {
     queueEntryId: `queue-${params.userId}`,
     userId: params.userId,
     joinedAt: params.joinedAt,
-    rating: new Prisma.Decimal(params.rating),
-    losingStreak: 0,
-    losingStreakPenalty: new Prisma.Decimal(20),
-    areaXp: 2500,
+    rating: new Prisma.Decimal(params.rating ?? "1000"),
+    losingStreak: params.losingStreak ?? 0,
+    areaXp: params.areaXp ?? 2500,
     isDummy: false,
     completedMatchesInPhase: 0,
     recentOpponentIds: new Set(params.opponents ?? []),
@@ -113,24 +114,15 @@ afterEach(async () => {
   createdTournamentIds.length = 0;
 });
 
-describe("matching rating", () => {
-  it("applies losing streak penalty without changing display rating", () => {
-    const rating = new Prisma.Decimal(1200);
-
-    expect(calculateMatchingRating({ rating, losingStreak: 0, losingStreakPenalty: 20 }).toString()).toBe("1200");
-    expect(calculateMatchingRating({ rating, losingStreak: 1, losingStreakPenalty: 20 }).toString()).toBe("1180");
-    expect(calculateMatchingRating({ rating, losingStreak: 3, losingStreakPenalty: 20 }).toString()).toBe("1140");
-    expect(rating.toString()).toBe("1200");
+describe("matching power", () => {
+  it("uses area XP minus 50 per losing streak without using tournament rating", () => {
+    expect(calculateMatchingPower({ areaXp: 2700, losingStreak: 0 }).toString()).toBe("2700");
+    expect(calculateMatchingPower({ areaXp: 2800, losingStreak: 2 }).toString()).toBe("2700");
+    expect(calculateMatchingPower({ areaXp: 2500, losingStreak: 3 }).toString()).toBe("2350");
   });
 
-  it("uses configurable losingStreakPenalty 50 and never applies winning streak to matching rating", () => {
-    const rating = new Prisma.Decimal(1500);
-
-    expect(calculateMatchingRating({ rating, losingStreak: 0, losingStreakPenalty: 50 }).toString()).toBe("1500");
-    expect(calculateMatchingRating({ rating, losingStreak: 1, losingStreakPenalty: 50 }).toString()).toBe("1450");
-    expect(calculateMatchingRating({ rating, losingStreak: 3, losingStreakPenalty: 50 }).toString()).toBe("1350");
-    expect(calculateMatchingRating({ rating, losingStreak: 5, losingStreakPenalty: 50 }).toString()).toBe("1250");
-    expect(rating.toString()).toBe("1500");
+  it("ignores tournament rating when calculating matching power", () => {
+    expect(calculateMatchingPower({ areaXp: 2600, losingStreak: 1 }).toString()).toBe("2550");
   });
 });
 
@@ -139,7 +131,7 @@ describe("candidate selection", () => {
     const players = Array.from({ length: 7 }, (_, index) =>
       waitingPlayer({
         userId: `p${index}`,
-        rating: "1000",
+        areaXp: 2500,
         joinedAt: new Date("2026-08-22T00:00:00Z"),
       }),
     );
@@ -154,11 +146,12 @@ describe("candidate selection", () => {
       ...Array.from({ length: 7 }, (_, index) =>
         waitingPlayer({
           userId: `close-${index}`,
-          rating: String(990 + index),
+          rating: String(3000 + index * 200),
+          areaXp: 2490 + index,
           joinedAt: new Date("2026-08-22T00:01:00Z"),
         }),
       ),
-      waitingPlayer({ userId: "far", rating: "2000", joinedAt: new Date("2026-08-22T00:01:00Z") }),
+      waitingPlayer({ userId: "far", rating: "1000", areaXp: 3000, joinedAt: new Date("2026-08-22T00:01:00Z") }),
     ];
 
     const selected = selectEightPlayers(players, new Date("2026-08-22T00:02:00Z"));
@@ -167,13 +160,13 @@ describe("candidate selection", () => {
     expect(selected?.map((player) => player.userId)).not.toContain("far");
   });
 
-  it("keeps the longest waiting player as anchor even when rating is far away", () => {
+  it("keeps the longest waiting least-played player as anchor even when matching power is far away", () => {
     const players = [
-      waitingPlayer({ userId: "oldest", rating: "3000", joinedAt: new Date("2026-08-22T00:00:00Z") }),
+      waitingPlayer({ userId: "oldest", areaXp: 3000, joinedAt: new Date("2026-08-22T00:00:00Z") }),
       ...Array.from({ length: 8 }, (_, index) =>
         waitingPlayer({
           userId: `normal-${index}`,
-          rating: "1000",
+          areaXp: 2500,
           joinedAt: new Date("2026-08-22T00:10:00Z"),
         }),
       ),
@@ -187,17 +180,17 @@ describe("candidate selection", () => {
   it("penalizes rematches but still allows them when needed", () => {
     const anchor = waitingPlayer({
       userId: "anchor",
-      rating: "1000",
+      areaXp: 2500,
       joinedAt: new Date("2026-08-22T00:00:00Z"),
       opponents: ["rematch"],
     });
     const players = [
       anchor,
-      waitingPlayer({ userId: "rematch", rating: "1000", joinedAt: new Date("2026-08-22T00:01:00Z") }),
+      waitingPlayer({ userId: "rematch", areaXp: 2500, joinedAt: new Date("2026-08-22T00:01:00Z") }),
       ...Array.from({ length: 7 }, (_, index) =>
         waitingPlayer({
           userId: `other-${index}`,
-          rating: "1010",
+          areaXp: 2510,
           joinedAt: new Date("2026-08-22T00:01:00Z"),
         }),
       ),
@@ -210,27 +203,68 @@ describe("candidate selection", () => {
     const fallback = selectEightPlayers(onlyRematchPool, new Date("2026-08-22T00:02:00Z"));
     expect(fallback?.map((player) => player.userId)).toContain("rematch");
   });
+
+  it("does not prefer XP 2000 and XP 3000 in the same candidate group when closer XP players exist", () => {
+    const players = [
+      waitingPlayer({ userId: "anchor", areaXp: 2500, joinedAt: new Date("2026-08-22T00:00:00Z") }),
+      ...Array.from({ length: 7 }, (_, index) =>
+        waitingPlayer({
+          userId: `near-${index}`,
+          areaXp: 2480 + index * 5,
+          joinedAt: new Date("2026-08-22T00:01:00Z"),
+        }),
+      ),
+      waitingPlayer({ userId: "low", areaXp: 2000, joinedAt: new Date("2026-08-22T00:01:00Z") }),
+      waitingPlayer({ userId: "high", areaXp: 3000, joinedAt: new Date("2026-08-22T00:01:00Z") }),
+    ];
+
+    const selected = selectEightPlayers(players, new Date("2026-08-22T00:02:00Z"))?.map((player) => player.userId);
+
+    expect(selected).toContain("anchor");
+    expect(selected).not.toContain("low");
+    expect(selected).not.toContain("high");
+  });
+
+  it("keeps required match count fairness before matching power proximity", () => {
+    const players = [
+      { ...waitingPlayer({ userId: "oldest", areaXp: 2500, joinedAt: new Date("2026-08-22T00:00:00Z") }), completedMatchesInPhase: 0 },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        ...waitingPlayer({ userId: `less-${index}`, areaXp: 2700 + index, joinedAt: new Date("2026-08-22T00:02:00Z") }),
+        completedMatchesInPhase: 0,
+      })),
+      ...Array.from({ length: 7 }, (_, index) => ({
+        ...waitingPlayer({ userId: `more-${index}`, areaXp: 2500 + index, joinedAt: new Date("2026-08-22T00:01:00Z") }),
+        completedMatchesInPhase: 1,
+      })),
+    ];
+
+    const selected = selectEightPlayers(players, new Date("2026-08-22T00:03:00Z"))?.map((player) => player.userId);
+
+    expect(selected?.filter((userId) => userId.startsWith("less-"))).toHaveLength(7);
+    expect(selected?.some((userId) => userId.startsWith("more-"))).toBe(false);
+  });
 });
 
 describe("team assignment", () => {
-  it("creates 4v4 teams with minimum matching rating difference", () => {
-    const players = [1000, 1000, 1100, 1100, 1200, 1200, 1300, 1300].map((rating, index) => ({
+  it("creates 4v4 teams with minimum matching power difference", () => {
+    const players = [1000, 1000, 1100, 1100, 1200, 1200, 1300, 1300].map((power, index) => ({
       ...waitingPlayer({
         userId: `p${index}`,
-        rating: String(rating),
+        areaXp: power,
         joinedAt: new Date("2026-08-22T00:00:00Z"),
       }),
-      matchingRating: new Prisma.Decimal(rating),
+      matchingPower: new Prisma.Decimal(power),
     }));
 
     const teams = splitIntoBalancedTeams(players);
-    const sumA = teams.teamA.reduce((sum, player) => sum.add(player.matchingRating), new Prisma.Decimal(0));
-    const sumB = teams.teamB.reduce((sum, player) => sum.add(player.matchingRating), new Prisma.Decimal(0));
+    const sumA = teams.teamA.reduce((sum, player) => sum.add(player.matchingPower), new Prisma.Decimal(0));
+    const sumB = teams.teamB.reduce((sum, player) => sum.add(player.matchingPower), new Prisma.Decimal(0));
 
     expect(teams.teamA).toHaveLength(4);
     expect(teams.teamB).toHaveLength(4);
     expect(new Set([...teams.teamA, ...teams.teamB].map((player) => player.userId))).toHaveLength(8);
     expect(sumA.sub(sumB).abs().toString()).toBe("0");
+    expect(teams.matchingPowerDifference.toString()).toBe("0");
   });
 });
 
@@ -329,6 +363,9 @@ describe("queue and matchmaking service", () => {
     expect(match?.players.every((player) => player.ratingBefore !== null)).toBe(true);
     expect(match?.players.every((player) => player.matchingRatingAtMatch !== null)).toBe(true);
     expect(match?.players.every((player) => player.areaXpAtMatch >= 2400)).toBe(true);
+    for (const player of match?.players ?? []) {
+      expect(player.matchingRatingAtMatch.toString()).toBe(String(player.areaXpAtMatch - player.losingStreakAtMatch * 50));
+    }
     expect(match?.players.every((player) => player.ratingAfter === null)).toBe(true);
     expect(match?.queueEntries).toHaveLength(8);
     expect(match?.queueEntries.every((entry) => entry.status === "MATCHED")).toBe(true);
@@ -342,6 +379,29 @@ describe("queue and matchmaking service", () => {
     const reloaded = await prisma.match.findUniqueOrThrow({ where: { id: result.matchId } });
     expect(reloaded.privateRoomCode).toBe(match?.privateRoomCode);
     expect(reloaded.roomHostUserId).toBe(match?.roomHostUserId);
+  });
+
+  it("does not let tournament rating changes affect XP-based matchmaking snapshots", async () => {
+    const { tournament, phase, players } = await createActiveTournamentWithPhase(8);
+    for (let index = 0; index < players.length; index += 1) {
+      await prisma.tournamentParticipant.update({
+        where: { tournamentId_userId: { tournamentId: tournament.id, userId: players[index].id } },
+        data: {
+          rating: String(3000 - index * 250),
+          areaXp: 2500,
+          losingStreak: 0,
+        },
+      });
+      await joinQueue(players[index].id, phase.id);
+    }
+
+    const result = await runMatchmaking(phase.id);
+    expect(result.matched).toBe(true);
+    if (!result.matched) throw new Error("Expected match");
+
+    const match = await prisma.match.findUniqueOrThrow({ where: { id: result.matchId }, include: { players: true } });
+    expect(match.players.every((player) => player.matchingRatingAtMatch.toString() === "2500")).toBe(true);
+    expect(new Set(match.players.map((player) => player.ratingBefore.toString())).size).toBeGreaterThan(1);
   });
 
   it("does not reuse private room codes across active matches", async () => {
