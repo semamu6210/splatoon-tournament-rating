@@ -153,7 +153,6 @@ export async function deleteTournament(user: AuthenticatedUser, tournamentId: st
           select: {
             phases: true,
             participants: true,
-            ratingConfigs: true,
             queueEntries: true,
             matches: true,
             ratingHistories: true,
@@ -178,6 +177,7 @@ export async function deleteTournament(user: AuthenticatedUser, tournamentId: st
     const matchPlayers = await tx.matchPlayer.count({ where: { match: { tournamentId } } });
     const resultReports = await tx.matchResultReport.count({ where: { match: { tournamentId } } });
     const playerVotes = await tx.playerVote.count({ where: { match: { tournamentId } } });
+    const ratingConfigs = await tx.tournamentRatingConfig.count({ where: { tournamentId } });
 
     await tx.adminActionLog.create({
       data: {
@@ -196,6 +196,7 @@ export async function deleteTournament(user: AuthenticatedUser, tournamentId: st
           },
           deletedCounts: {
             ...tournament._count,
+            ratingConfigs,
             phaseParticipants,
             blocks,
             blockParticipants,

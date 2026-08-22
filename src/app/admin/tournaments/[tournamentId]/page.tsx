@@ -120,10 +120,6 @@ export default async function AdminTournamentPage({ params }: PageProps) {
     ? await prisma.tournament.findUnique({
         where: { id: tournamentId },
         include: {
-          ratingConfigs: {
-            where: { isActive: true },
-            include: { xpMultiplierTiers: { orderBy: { sortOrder: "asc" } } },
-          },
           participants: {
             include: {
               user: {
@@ -177,9 +173,11 @@ export default async function AdminTournamentPage({ params }: PageProps) {
     );
   }
 
-  const activeConfig = tournament.ratingConfigs[0]
-    ? serializeRatingConfig(tournament.ratingConfigs[0])
-    : null;
+  const activeRatingConfig = await prisma.tournamentRatingConfig.findFirst({
+    where: { tournamentId: tournament.id, isActive: true },
+    include: { xpMultiplierTiers: { orderBy: { sortOrder: "asc" } } },
+  });
+  const activeConfig = activeRatingConfig ? serializeRatingConfig(activeRatingConfig) : null;
   const rankings = await getTournamentRankings(tournament.id);
   const operationWarnings = await getTournamentOperationWarnings(tournament.id);
   const tabRankings = {

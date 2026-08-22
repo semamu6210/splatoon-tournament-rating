@@ -33,22 +33,20 @@ export async function GET(_request: Request, context: Context) {
           },
           orderBy: { joinedAt: "asc" },
         },
-        ratingConfigs: {
-          where: { isActive: true },
-          include: { xpMultiplierTiers: { orderBy: { sortOrder: "asc" } } },
-        },
       },
     });
 
     if (!tournament) {
       return ok({ tournament: null }, 404);
     }
+    const activeRatingConfig = await prisma.tournamentRatingConfig.findFirst({
+      where: { tournamentId, isActive: true },
+      include: { xpMultiplierTiers: { orderBy: { sortOrder: "asc" } } },
+    });
 
     return ok({
       tournament: serializeTournament(tournament),
-      activeRatingConfig: tournament.ratingConfigs[0]
-        ? serializeRatingConfig(tournament.ratingConfigs[0])
-        : null,
+      activeRatingConfig: activeRatingConfig ? serializeRatingConfig(activeRatingConfig) : null,
       participants: tournament.participants.map(serializeParticipant),
     });
   } catch (error) {
