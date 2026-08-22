@@ -1,0 +1,526 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  PLAYER
+  ADMIN
+  OWNER
+}
+
+enum TournamentStatus {
+  DRAFT
+  REGISTRATION
+  ACTIVE
+  FINISHED
+}
+
+enum TournamentPhaseType {
+  QUALIFIER
+  MAIN_EVENT
+}
+
+enum TournamentPhaseStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+}
+
+enum AdvancementMode {
+  OVERALL
+  BLOCK
+}
+
+enum QueueStatus {
+  WAITING
+  MATCHED
+  CANCELLED
+}
+
+enum MatchStatus {
+  CREATED
+  PLAYING
+  RESULT_REPORTING
+  VOTE_REPORTING
+  CONFIRMED
+  CANCELLED
+}
+
+enum Team {
+  A
+  B
+}
+
+enum VoteType {
+  STRONG
+  WEAK
+}
+
+enum RankingVisibility {
+  OWN_BLOCK_ONLY
+  OWN_AND_OTHER_BLOCKS
+  OVERALL_ONLY
+  ALL
+}
+
+enum MatchRule {
+  AREA
+  YAGURA
+  HOKO
+  ASARI
+}
+
+enum StageSelectionMode {
+  ADMIN
+  RANDOM
+}
+
+model User {
+  id              String    @id @default(cuid())
+  name            String?
+  email           String?   @unique
+  emailVerified   DateTime?
+  image           String?
+  discordId       String?   @unique
+  discordUsername String?
+  avatarUrl       String?
+  role            UserRole  @default(PLAYER)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  accounts             Account[]
+  sessions             Session[]
+  authenticators       Authenticator[]
+  createdTournaments   Tournament[]           @relation("TournamentCreator")
+  participants         TournamentParticipant[]
+  queueEntries         QueueEntry[]
+  matchPlayers         MatchPlayer[]
+  resultReports        MatchResultReport[]
+  votesCast            PlayerVote[]           @relation("PlayerVoteVoter")
+  votesReceived        PlayerVote[]           @relation("PlayerVoteTarget")
+  ratingHistories      RatingHistory[]
+  adminActionLogs      AdminActionLog[]        @relation("AdminActionActor")
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?  @db.Text
+  access_token      String?  @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?  @db.Text
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
+}
+
+model Tournament {
+  id                       String           @id @default(cuid())
+  name                     String
+  status                   TournamentStatus @default(DRAFT)
+  createdByUserId          String
+  startRatingConfigId      String?
+  startRatingConfigVersion Int?
+  startsAt                 DateTime?
+  endsAt                   DateTime?
+  rankingVisibility        RankingVisibility @default(ALL)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  createdBy         User                      @relation("TournamentCreator", fields: [createdByUserId], references: [id])
+  startRatingConfig TournamentRatingConfig?    @relation("TournamentStartRatingConfig", fields: [startRatingConfigId], references: [id])
+  phases            TournamentPhase[]
+  participants      TournamentParticipant[]
+  ratingConfigs     TournamentRatingConfig[]   @relation("TournamentRatingConfigs")
+  queueEntries      QueueEntry[]
+  matches           Match[]
+  ratingHistories   RatingHistory[]
+  stages            TournamentStage[]
+
+  @@index([status])
+  @@index([createdByUserId])
+}
+
+model TournamentPhase {
+  id                       String                @id @default(cuid())
+  tournamentId             String
+  phaseType                TournamentPhaseType
+  status                   TournamentPhaseStatus @default(PENDING)
+  requiredMatchesPerPlayer Int
+  advancePlayerCount       Int?
+  advancementMode          AdvancementMode       @default(OVERALL)
+  rule                     MatchRule             @default(AREA)
+  stageSelectionMode       StageSelectionMode     @default(RANDOM)
+  defaultStageId           String?
+  sortOrder                Int
+  startedAt                DateTime?
+  completedAt              DateTime?
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+
+  tournament   Tournament   @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  queueEntries QueueEntry[]
+  matches      Match[]
+  blocks       TournamentBlock[]
+  participants TournamentPhaseParticipant[]
+  blockParticipants TournamentBlockParticipant[]
+  defaultStage TournamentStage? @relation("PhaseDefaultStage", fields: [defaultStageId], references: [id], onDelete: SetNull)
+
+  @@unique([tournamentId, phaseType])
+  @@unique([tournamentId, sortOrder])
+  @@index([tournamentId, status])
+  @@index([defaultStageId])
+}
+
+model TournamentStage {
+  id           String   @id @default(cuid())
+  tournamentId String
+  name         String
+  sortOrder    Int
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  defaultForPhases TournamentPhase[] @relation("PhaseDefaultStage")
+  matches Match[]
+
+  @@unique([tournamentId, name])
+  @@unique([tournamentId, sortOrder])
+  @@index([tournamentId, isActive])
+}
+
+model TournamentPhaseParticipant {
+  id                      String    @id @default(cuid())
+  phaseId                 String
+  tournamentParticipantId String
+  isEligible              Boolean   @default(true)
+  isAdvancing             Boolean   @default(false)
+  advancedAt              DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  phase                 TournamentPhase       @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  tournamentParticipant TournamentParticipant @relation(fields: [tournamentParticipantId], references: [id], onDelete: Cascade)
+
+  @@unique([phaseId, tournamentParticipantId])
+  @@index([phaseId, isEligible])
+  @@index([phaseId, isAdvancing])
+  @@index([tournamentParticipantId])
+}
+
+model TournamentBlock {
+  id        String   @id @default(cuid())
+  phaseId   String
+  name      String
+  advancePlayerCount Int?
+  sortOrder Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  phase        TournamentPhase               @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  participants TournamentBlockParticipant[]
+
+  @@unique([phaseId, name])
+  @@unique([phaseId, sortOrder])
+  @@index([phaseId])
+}
+
+model TournamentBlockParticipant {
+  id                      String   @id @default(cuid())
+  blockId                 String
+  phaseId                 String
+  tournamentParticipantId String
+  createdAt               DateTime @default(now())
+
+  block                 TournamentBlock       @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  phase                 TournamentPhase       @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  tournamentParticipant TournamentParticipant @relation(fields: [tournamentParticipantId], references: [id], onDelete: Cascade)
+
+  @@unique([blockId, tournamentParticipantId])
+  @@unique([phaseId, tournamentParticipantId])
+  @@index([phaseId])
+  @@index([tournamentParticipantId])
+}
+
+model TournamentParticipant {
+  id                         String    @id @default(cuid())
+  tournamentId               String
+  userId                     String
+  participantName            String
+  areaXp                     Int
+  rating                     Decimal?  @db.Decimal(12, 2)
+  ratingInitializedAt        DateTime?
+  initialRatingConfigId      String?
+  initialRatingConfigVersion Int?
+  wins                       Int       @default(0)
+  losses                     Int       @default(0)
+  matchesPlayed              Int       @default(0)
+  winningStreak              Int       @default(0)
+  losingStreak               Int       @default(0)
+  blockName                  String?
+  advancedToMainEvent        Boolean   @default(false)
+  finalRank                  Int?
+  isActive                   Boolean   @default(true)
+  joinedAt                   DateTime  @default(now())
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  tournament          Tournament              @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user                User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  initialRatingConfig TournamentRatingConfig? @relation("ParticipantInitialRatingConfig", fields: [initialRatingConfigId], references: [id])
+  phaseParticipations TournamentPhaseParticipant[]
+  blockParticipations TournamentBlockParticipant[]
+
+  @@unique([tournamentId, userId])
+  @@index([tournamentId])
+  @@index([userId])
+  @@index([rating])
+  @@index([tournamentId, blockName, rating])
+  @@index([tournamentId, advancedToMainEvent])
+}
+
+model TournamentRatingConfig {
+  id                   String   @id @default(cuid())
+  tournamentId         String
+  version              Int
+  initialRating        Decimal  @db.Decimal(12, 2)
+  winBonus             Decimal  @db.Decimal(12, 2)
+  strongVotePoints     Decimal  @db.Decimal(12, 2)
+  weakVotePoints       Decimal  @db.Decimal(12, 2)
+  losingStreakPenalty  Decimal  @db.Decimal(12, 2)
+  xpTierStepSize       Int
+  isActive             Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  tournament                   Tournament              @relation("TournamentRatingConfigs", fields: [tournamentId], references: [id], onDelete: Cascade)
+  xpMultiplierTiers            TournamentXpMultiplierTier[]
+  matches                      Match[]
+  ratingHistories              RatingHistory[]         @relation("RatingHistoryConfigUsed")
+  initializedParticipants      TournamentParticipant[] @relation("ParticipantInitialRatingConfig")
+  tournamentsInitializedByThis Tournament[]            @relation("TournamentStartRatingConfig")
+
+  @@unique([tournamentId, version])
+  @@index([tournamentId])
+}
+
+model TournamentXpMultiplierTier {
+  id                         String   @id @default(cuid())
+  tournamentRatingConfigId   String
+  minXp                      Int?
+  maxXp                      Int?
+  multiplier                 Decimal  @db.Decimal(8, 4)
+  sortOrder                  Int
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  ratingConfig TournamentRatingConfig @relation(fields: [tournamentRatingConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([tournamentRatingConfigId, sortOrder], map: "XpMultiplierTier_config_sortOrder_key")
+  @@index([tournamentRatingConfigId])
+}
+
+model QueueEntry {
+  id           String      @id @default(cuid())
+  tournamentId String
+  phaseId      String
+  userId       String
+  matchId      String?
+  status       QueueStatus @default(WAITING)
+  joinedAt     DateTime    @default(now())
+  matchedAt    DateTime?
+
+  tournament Tournament      @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  phase      TournamentPhase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match      Match?          @relation(fields: [matchId], references: [id], onDelete: SetNull)
+
+  @@index([phaseId, status, joinedAt])
+  @@index([tournamentId])
+  @@index([userId])
+  @@index([matchId])
+}
+
+model Match {
+  id                  String      @id @default(cuid())
+  tournamentId        String
+  phaseId             String
+  ratingConfigId      String
+  ratingConfigVersion Int
+  matchNumber         Int?
+  rule                MatchRule   @default(AREA)
+  stageId             String?
+  stageName           String?
+  status              MatchStatus @default(CREATED)
+  winnerTeam          Team?
+  ratingAppliedAt     DateTime?
+  votingClosedAt       DateTime?
+  createdAt           DateTime    @default(now())
+  confirmedAt         DateTime?
+  cancelledAt         DateTime?
+
+  tournament      Tournament             @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  phase           TournamentPhase        @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  ratingConfig    TournamentRatingConfig @relation(fields: [ratingConfigId], references: [id])
+  stage           TournamentStage?       @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  queueEntries    QueueEntry[]
+  players         MatchPlayer[]
+  resultReports   MatchResultReport[]
+  playerVotes     PlayerVote[]
+  ratingHistories RatingHistory[]
+
+  @@index([tournamentId, phaseId, status, createdAt])
+  @@index([ratingConfigId])
+  @@unique([phaseId, matchNumber])
+  @@index([stageId])
+}
+
+model MatchPlayer {
+  id                    String   @id @default(cuid())
+  matchId               String
+  userId                String
+  team                  Team
+  ratingBefore          Decimal  @db.Decimal(12, 2)
+  matchingRatingAtMatch Decimal  @db.Decimal(12, 2)
+  areaXpAtMatch         Int
+  losingStreakAtMatch   Int
+  ratingAfter           Decimal? @db.Decimal(12, 2)
+
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, userId])
+  @@index([matchId, team])
+  @@index([userId])
+}
+
+model MatchResultReport {
+  id                 String   @id @default(cuid())
+  matchId            String
+  userId             String
+  reportedWinnerTeam Team
+  createdAt          DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, userId])
+  @@index([userId])
+}
+
+model PlayerVote {
+  id           String   @id @default(cuid())
+  matchId      String
+  voterUserId  String
+  targetUserId String
+  voteType     VoteType
+  createdAt    DateTime @default(now())
+
+  match  Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  voter  User  @relation("PlayerVoteVoter", fields: [voterUserId], references: [id], onDelete: Cascade)
+  target User  @relation("PlayerVoteTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, voterUserId, voteType])
+  @@unique([matchId, voterUserId, targetUserId])
+  @@index([matchId, voterUserId])
+  @@index([matchId, targetUserId])
+}
+
+model RatingHistory {
+  id                       String   @id @default(cuid())
+  tournamentId             String
+  matchId                  String
+  userId                   String
+  ratingConfigIdUsed       String
+  ratingConfigVersionUsed  Int
+  ratingBefore             Decimal  @db.Decimal(12, 2)
+  strongVotesReceived      Int
+  weakVotesReceived        Int
+  strongVotePointsUsed     Decimal  @db.Decimal(12, 2)
+  weakVotePointsUsed       Decimal  @db.Decimal(12, 2)
+  winBonusUsed             Decimal  @db.Decimal(12, 2)
+  losingStreakPenaltyUsed  Decimal  @db.Decimal(12, 2)
+  votePoints               Decimal  @db.Decimal(12, 2)
+  baseDelta                Decimal  @db.Decimal(12, 2)
+  areaXpUsed               Int
+  xpTierMinUsed            Int?
+  xpTierMaxUsed            Int?
+  xpMultiplierUsed         Decimal  @db.Decimal(8, 4)
+  finalDelta               Decimal  @db.Decimal(12, 2)
+  ratingAfter              Decimal  @db.Decimal(12, 2)
+  createdAt                DateTime @default(now())
+
+  tournament       Tournament             @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  match            Match                  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  user             User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ratingConfigUsed TournamentRatingConfig @relation("RatingHistoryConfigUsed", fields: [ratingConfigIdUsed], references: [id])
+
+  @@unique([matchId, userId])
+  @@index([tournamentId, userId, matchId])
+  @@index([ratingConfigIdUsed])
+}
+
+model AdminActionLog {
+  id          String   @id @default(cuid())
+  adminUserId String
+  action      String
+  targetType  String
+  targetId    String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  adminUser User @relation("AdminActionActor", fields: [adminUserId], references: [id])
+
+  @@index([adminUserId])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}

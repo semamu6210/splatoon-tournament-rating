@@ -1,0 +1,13 @@
+.env
+.env*.local
+node_modules
+.next
+out
+coverage
+playwright-report
+test-results
+*.tsbuildinfo
+prisma/dev.db
+# IntelliJ IDEA
+.idea/
+*.iml

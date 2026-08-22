@@ -1,0 +1,56 @@
+{
+  "name": "splatoon-tournament-rating-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "postinstall": "prisma generate",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:watch": "vitest",
+    "seed:dev": "tsx prisma/seed-dev.ts",
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@auth/prisma-adapter": "2.11.3",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "next": "16.3.2",
+    "next-auth": "5.0.0-beta.32",
+    "pg": "8.23.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "26.2.0",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "eslint": "9.34.0",
+    "eslint-config-next": "16.3.2",
+    "postcss": "8.5.26",
+    "prisma": "7.9.1",
+    "tailwindcss": "4.3.3",
+    "tsx": "^4.23.12",
+    "typescript": "5.9.2",
+    "vitest": "4.1.11"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.2"
+  }
+}

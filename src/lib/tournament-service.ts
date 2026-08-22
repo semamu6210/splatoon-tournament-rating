@@ -1,0 +1,372 @@
+import { Prisma, TournamentStatus, type RankingVisibility } from "@prisma/client";
+
+import { ApiError } from "@/lib/http";
+import {
+  configSnapshot,
+  normalizeRatingConfigInput,
+  type RatingConfigInput,
+  validateCompleteRatingConfig,
+} from "@/lib/rating-config";
+import { prisma } from "@/lib/prisma";
+import { areaXpValue, optionalDate, requiredString } from "@/lib/validation";
+
+export type TournamentInput = {
+  name: unknown;
+  startsAt?: unknown;
+  endsAt?: unknown;
+  rankingVisibility?: unknown;
+};
+
+export function normalizeTournamentInput(input: TournamentInput) {
+  const startsAt = optionalDate(input.startsAt, "startsAt");
+  const endsAt = optionalDate(input.endsAt, "endsAt");
+
+  if (startsAt && endsAt && startsAt >= endsAt) {
+    throw new ApiError(400, "endsAt must be after startsAt.");
+  }
+
+  return {
+    name: requiredString(input.name, "name"),
+    startsAt,
+    endsAt,
+    rankingVisibility: (
+      input.rankingVisibility === "OWN_BLOCK_ONLY" ||
+      input.rankingVisibility === "OWN_AND_OTHER_BLOCKS" ||
+      input.rankingVisibility === "OVERALL_ONLY" ||
+      input.rankingVisibility === "ALL"
+        ? input.rankingVisibility
+        : undefined) as RankingVisibility | undefined,
+  };
+}
+
+export async function createTournament(adminUserId: string, input: TournamentInput) {
+  const data = normalizeTournamentInput(input);
+
+  return prisma.$transaction(async (tx) => {
+    const tournament = await tx.tournament.create({
+      data: {
+        ...data,
+        createdByUserId: adminUserId,
+        status: TournamentStatus.DRAFT,
+      },
+    });
+
+    await tx.adminActionLog.create({
+      data: {
+        adminUserId,
+        action: "TOURNAMENT_CREATED",
+        targetType: "Tournament",
+        targetId: tournament.id,
+        metadata: { after: data },
+      },
+    });
+
+    return tournament;
+  });
+}
+
+export async function updateTournament(adminUserId: string, tournamentId: string, input: TournamentInput) {
+  const data = normalizeTournamentInput(input);
+
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.tournament.findUnique({ where: { id: tournamentId } });
+
+    if (!before) {
+      throw new ApiError(404, "Tournament not found.");
+    }
+
+    if (before.status !== TournamentStatus.DRAFT && before.status !== TournamentStatus.REGISTRATION) {
+      throw new ApiError(400, "Only DRAFT or REGISTRATION tournaments can be edited.");
+    }
+
+    const after = await tx.tournament.update({
+      where: { id: tournamentId },
+      data,
+    });
+
+    await tx.adminActionLog.create({
+      data: {
+        adminUserId,
+        action: "TOURNAMENT_UPDATED",
+        targetType: "Tournament",
+        targetId: tournamentId,
+        metadata: {
+          before: {
+            name: before.name,
+            startsAt: before.startsAt?.toISOString() ?? null,
+            endsAt: before.endsAt?.toISOString() ?? null,
+          },
+          after: {
+            name: after.name,
+            startsAt: after.startsAt?.toISOString() ?? null,
+            endsAt: after.endsAt?.toISOString() ?? null,
+          },
+        },
+      },
+    });
+
+    return after;
+  });
+}
+
+export async function openRegistration(adminUserId: string, tournamentId: string) {
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.tournament.findUnique({ where: { id: tournamentId } });
+
+    if (!before) {
+      throw new ApiError(404, "Tournament not found.");
+    }
+
+    if (before.status !== TournamentStatus.DRAFT) {
+      throw new ApiError(400, "Only DRAFT tournaments can open registration.");
+    }
+
+    const after = await tx.tournament.update({
+      where: { id: tournamentId },
+      data: { status: TournamentStatus.REGISTRATION },
+    });
+
+    await tx.adminActionLog.create({
+      data: {
+        adminUserId,
+        action: "TOURNAMENT_REGISTRATION_OPENED",
+        targetType: "Tournament",
+        targetId: tournamentId,
+        metadata: { before: { status: before.status }, after: { status: after.status } },
+      },
+    });
+
+    return after;
+  });
+}
+
+export async function createRatingConfigVersion(
+  adminUserId: string,
+  tournamentId: string,
+  input: RatingConfigInput,
+) {
+  const normalized = normalizeRatingConfigInput(input);
+
+  return prisma.$transaction(async (tx) => {
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
+
+    if (!tournament) {
+      throw new ApiError(404, "Tournament not found.");
+    }
+
+    if (tournament.status === TournamentStatus.FINISHED) {
+      throw new ApiError(400, "FINISHED tournaments cannot change rating config.");
+    }
+
+    const activeBefore = await tx.tournamentRatingConfig.findFirst({
+      where: { tournamentId, isActive: true },
+      include: { xpMultiplierTiers: true },
+    });
+
+    const latest = await tx.tournamentRatingConfig.findFirst({
+      where: { tournamentId },
+      orderBy: { version: "desc" },
+    });
+
+    await tx.tournamentRatingConfig.updateMany({
+      where: { tournamentId, isActive: true },
+      data: { isActive: false },
+    });
+
+    const created = await tx.tournamentRatingConfig.create({
+      data: {
+        tournamentId,
+        version: (latest?.version ?? 0) + 1,
+        initialRating: normalized.initialRating,
+        winBonus: normalized.winBonus,
+        strongVotePoints: normalized.strongVotePoints,
+        weakVotePoints: normalized.weakVotePoints,
+        losingStreakPenalty: normalized.losingStreakPenalty,
+        xpTierStepSize: normalized.xpTierStepSize,
+        isActive: true,
+        xpMultiplierTiers: {
+          create: normalized.tiers.map((tier) => ({
+            minXp: tier.minXp,
+            maxXp: tier.maxXp,
+            multiplier: tier.multiplier,
+            sortOrder: tier.sortOrder,
+          })),
+        },
+      },
+      include: { xpMultiplierTiers: true },
+    });
+
+    await tx.adminActionLog.create({
+      data: {
+        adminUserId,
+        action: activeBefore ? "RATING_CONFIG_VERSION_CREATED" : "RATING_CONFIG_CREATED",
+        targetType: "Tournament",
+        targetId: tournamentId,
+        metadata: {
+          before: activeBefore ? configSnapshot(activeBefore) : null,
+          after: configSnapshot(created),
+        },
+      },
+    });
+
+    return created;
+  });
+}
+
+export async function joinTournament(userId: string, tournamentId: string, input: { areaXp: unknown }) {
+  const areaXp = areaXpValue(input.areaXp);
+
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user) throw new ApiError(404, "User not found.");
+    const participantName = user.discordUsername ?? user.name ?? user.id;
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
+
+    if (!tournament) {
+      throw new ApiError(404, "Tournament not found.");
+    }
+
+    if (tournament.status !== TournamentStatus.REGISTRATION) {
+      throw new ApiError(400, "Tournament registration is not open.");
+    }
+
+    const existing = await tx.tournamentParticipant.findUnique({
+      where: { tournamentId_userId: { tournamentId, userId } },
+    });
+
+    if (existing?.isActive) {
+      throw new ApiError(409, "Already joined this tournament.");
+    }
+
+    if (existing) {
+      return tx.tournamentParticipant.update({
+        where: { id: existing.id },
+        data: {
+          areaXp,
+          participantName,
+          rating: null,
+          ratingInitializedAt: null,
+          initialRatingConfigId: null,
+          initialRatingConfigVersion: null,
+          isActive: true,
+        },
+      });
+    }
+
+    return tx.tournamentParticipant.create({
+      data: {
+        tournamentId,
+        userId,
+        participantName,
+        areaXp,
+        rating: null,
+        ratingInitializedAt: null,
+      },
+    });
+  });
+}
+
+export async function leaveTournament(userId: string, tournamentId: string) {
+  return prisma.$transaction(async (tx) => {
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
+
+    if (!tournament) {
+      throw new ApiError(404, "Tournament not found.");
+    }
+
+    if (tournament.status !== TournamentStatus.REGISTRATION) {
+      throw new ApiError(400, "You can leave only during REGISTRATION.");
+    }
+
+    const participant = await tx.tournamentParticipant.findUnique({
+      where: { tournamentId_userId: { tournamentId, userId } },
+    });
+
+    if (!participant || !participant.isActive) {
+      throw new ApiError(404, "Active participation not found.");
+    }
+
+    return tx.tournamentParticipant.update({
+      where: { id: participant.id },
+      data: { isActive: false },
+    });
+  });
+}
+
+export async function startTournament(adminUserId: string, tournamentId: string) {
+  return prisma.$transaction(
+    async (tx) => {
+      const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
+
+      if (!tournament) {
+        throw new ApiError(404, "Tournament not found.");
+      }
+
+      if (tournament.status !== TournamentStatus.REGISTRATION) {
+        throw new ApiError(400, "Only REGISTRATION tournaments can be started.");
+      }
+
+      const activeConfigs = await tx.tournamentRatingConfig.findMany({
+        where: { tournamentId, isActive: true },
+        include: { xpMultiplierTiers: true },
+      });
+
+      if (activeConfigs.length !== 1) {
+        throw new ApiError(400, "Tournament must have exactly one active rating config.");
+      }
+
+      const activeConfig = activeConfigs[0];
+      validateCompleteRatingConfig(activeConfig);
+
+      const participants = await tx.tournamentParticipant.findMany({
+        where: { tournamentId, isActive: true },
+      });
+
+      if (participants.length === 0) {
+        throw new ApiError(400, "Tournament must have at least one active participant.");
+      }
+
+      for (const participant of participants) {
+        areaXpValue(participant.areaXp);
+      }
+
+      const initializedAt = new Date();
+
+      await tx.tournamentParticipant.updateMany({
+        where: { tournamentId, isActive: true },
+        data: {
+          rating: activeConfig.initialRating,
+          ratingInitializedAt: initializedAt,
+          initialRatingConfigId: activeConfig.id,
+          initialRatingConfigVersion: activeConfig.version,
+        },
+      });
+
+      const after = await tx.tournament.update({
+        where: { id: tournamentId },
+        data: {
+          status: TournamentStatus.ACTIVE,
+          startRatingConfigId: activeConfig.id,
+          startRatingConfigVersion: activeConfig.version,
+          startsAt: tournament.startsAt ?? initializedAt,
+        },
+      });
+
+      await tx.adminActionLog.create({
+        data: {
+          adminUserId,
+          action: "TOURNAMENT_STARTED",
+          targetType: "Tournament",
+          targetId: tournamentId,
+          metadata: {
+            ratingConfig: configSnapshot(activeConfig),
+            participantCount: participants.length,
+          },
+        },
+      });
+
+      return after;
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+}
