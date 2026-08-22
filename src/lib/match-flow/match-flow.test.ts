@@ -197,12 +197,35 @@ describe("result reports and rating application", () => {
     }
   }
 
-  it("collects result reports but uses admin force-result for confirmation", async () => {
-    const { match } = await createReadyMatch();
-    await submitResultReport(match.players[0].userId, match.id, "A");
-    const unchanged = await prisma.match.findUniqueOrThrow({ where: { id: match.id } });
-    expect(unchanged.status).toBe("RESULT_REPORTING");
-    expect(unchanged.winnerTeam).toBeNull();
+  it("allows only room host or admin to end a playing match", async () => {
+    const { admin, match } = await createReadyMatch();
+    const reloaded = await prisma.match.update({ where: { id: match.id }, data: { status: "PLAYING" } });
+    const hostId = reloaded.roomHostUserId!;
+    const nonHost = match.players.find((player) => player.userId !== hostId)!;
+
+    await expect(openResultReporting(match.id, nonHost.userId, UserRole.PLAYER)).rejects.toThrow("Only the room host or admin can end the match.");
+    await openResultReporting(match.id, hostId, UserRole.PLAYER);
+    expect((await prisma.match.findUniqueOrThrow({ where: { id: match.id } })).status).toBe("RESULT_REPORTING");
+
+    await prisma.match.update({ where: { id: match.id }, data: { status: "PLAYING" } });
+    await openResultReporting(match.id, admin.id, admin.role);
+    expect((await prisma.match.findUniqueOrThrow({ where: { id: match.id } })).status).toBe("RESULT_REPORTING");
+  });
+
+  it("allows only room host or admin to confirm the normal result", async () => {
+    const { admin, match } = await createReadyMatch();
+    const hostId = match.roomHostUserId!;
+    const nonHost = match.players.find((player) => player.userId !== hostId)!;
+
+    await expect(submitResultReport(nonHost.userId, match.id, "A", UserRole.PLAYER)).rejects.toThrow("Only the room host or admin can confirm the result.");
+    const hostConfirmed = await submitResultReport(hostId, match.id, "A", UserRole.PLAYER);
+    expect(hostConfirmed.status).toBe("VOTE_REPORTING");
+    expect(hostConfirmed.winnerTeam).toBe("A");
+
+    await prisma.match.update({ where: { id: match.id }, data: { status: "RESULT_REPORTING", winnerTeam: null } });
+    const adminConfirmed = await submitResultReport(admin.id, match.id, "B", admin.role);
+    expect(adminConfirmed.status).toBe("VOTE_REPORTING");
+    expect(adminConfirmed.winnerTeam).toBe("B");
   });
 
   it("applies Decimal rating changes, creates histories, updates streaks, and confirms match", async () => {
@@ -214,7 +237,6 @@ describe("result reports and rating application", () => {
     });
     await forceResult(admin.id, match.id, "A", "test");
     await voteAll(match.id);
-    await applyRating(match.id);
 
     const confirmed = await prisma.match.findUniqueOrThrow({
       where: { id: match.id },
@@ -256,19 +278,18 @@ describe("result reports and rating application", () => {
     await forceResult(admin.id, match.id, "A", "test");
     await expect(applyRating(match.id)).rejects.toThrow("All 8 players must complete STRONG and WEAK votes.");
     await voteAll(match.id);
-    await applyRating(match.id);
     await expect(applyRating(match.id)).rejects.toThrow("Rating has already been applied or match is not ready.");
   });
 
   it("rolls back when participant rating no longer matches MatchPlayer.ratingBefore", async () => {
     const { admin, match } = await createReadyMatch();
     await forceResult(admin.id, match.id, "A", "test");
-    await voteAll(match.id);
     const first = match.players[0];
     await prisma.tournamentParticipant.update({
       where: { tournamentId_userId: { tournamentId: match.tournamentId, userId: first.userId } },
       data: { rating: "9999" },
     });
+    await voteAll(match.id);
 
     await expect(applyRating(match.id)).rejects.toThrow("Participant rating no longer matches MatchPlayer.ratingBefore.");
     const histories = await prisma.ratingHistory.count({ where: { matchId: match.id } });
@@ -288,6 +309,65 @@ describe("result reports and rating application", () => {
     const reloaded = await prisma.match.findUniqueOrThrow({ where: { id: match.id } });
 
     expect(histories).toBe(8);
+    expect(reloaded.status).toBe("CONFIRMED");
+  });
+
+  it("does not auto-apply after 7 voters but applies after the 8th voter", async () => {
+    const { admin, match } = await createReadyMatch();
+    await forceResult(admin.id, match.id, "A", "test");
+
+    for (const voter of match.players.slice(0, 7)) {
+      const opponents = match.players.filter((player) => player.team !== voter.team);
+      await submitPlayerVotes(voter.userId, match.id, [
+        { targetUserId: opponents[0].userId, voteType: "STRONG" },
+        { targetUserId: opponents[1].userId, voteType: "WEAK" },
+      ]);
+    }
+
+    let reloaded = await prisma.match.findUniqueOrThrow({ where: { id: match.id } });
+    expect(reloaded.status).toBe("VOTE_REPORTING");
+    expect(reloaded.ratingAppliedAt).toBeNull();
+    expect(await prisma.ratingHistory.count({ where: { matchId: match.id } })).toBe(0);
+
+    const lastVoter = match.players[7];
+    const opponents = match.players.filter((player) => player.team !== lastVoter.team);
+    await submitPlayerVotes(lastVoter.userId, match.id, [
+      { targetUserId: opponents[0].userId, voteType: "STRONG" },
+      { targetUserId: opponents[1].userId, voteType: "WEAK" },
+    ]);
+
+    reloaded = await prisma.match.findUniqueOrThrow({ where: { id: match.id } });
+    expect(reloaded.status).toBe("CONFIRMED");
+    expect(reloaded.ratingAppliedAt).toBeInstanceOf(Date);
+    expect(await prisma.ratingHistory.count({ where: { matchId: match.id } })).toBe(8);
+  });
+
+  it("auto-apply remains single when final votes arrive concurrently", async () => {
+    const { admin, match } = await createReadyMatch();
+    await forceResult(admin.id, match.id, "A", "test");
+
+    for (const voter of match.players.slice(0, 6)) {
+      const opponents = match.players.filter((player) => player.team !== voter.team);
+      await submitPlayerVotes(voter.userId, match.id, [
+        { targetUserId: opponents[0].userId, voteType: "STRONG" },
+        { targetUserId: opponents[1].userId, voteType: "WEAK" },
+      ]);
+    }
+
+    await Promise.all(
+      match.players.slice(6).map((voter) => {
+        const opponents = match.players.filter((player) => player.team !== voter.team);
+        return submitPlayerVotes(voter.userId, match.id, [
+          { targetUserId: opponents[0].userId, voteType: "STRONG" },
+          { targetUserId: opponents[1].userId, voteType: "WEAK" },
+        ]);
+      }),
+    );
+
+    const histories = await prisma.ratingHistory.findMany({ where: { matchId: match.id } });
+    const reloaded = await prisma.match.findUniqueOrThrow({ where: { id: match.id } });
+    expect(histories).toHaveLength(8);
+    expect(new Set(histories.map((history) => history.userId))).toHaveLength(8);
     expect(reloaded.status).toBe("CONFIRMED");
   });
 

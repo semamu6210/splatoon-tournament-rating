@@ -227,8 +227,8 @@ export default async function TournamentDetailPage({ params }: PageProps) {
                 </p>
               )}
               <p>本戦進出状態: {myParticipant.advancedToMainEvent ? "本戦対象" : "未確定/対象外"}</p>
-              <p>大会累計 強い票: {voteCount(myVoteStats, "STRONG")} / 弱い票: {voteCount(myVoteStats, "WEAK")}</p>
-              <p>現在フェーズ 強い票: {voteCount(myPhaseVoteStats, "STRONG")} / 弱い票: {voteCount(myPhaseVoteStats, "WEAK")}</p>
+              <p>大会累計 1票目: {voteCount(myVoteStats, "STRONG")} / 2票目: {voteCount(myVoteStats, "WEAK")}</p>
+              <p>現在フェーズ 1票目: {voteCount(myPhaseVoteStats, "STRONG")} / 2票目: {voteCount(myPhaseVoteStats, "WEAK")}</p>
               {tournament.status === "REGISTRATION" && (
                 <ApiButton url={`/api/tournaments/${tournament.id}/leave`}>参加取消</ApiButton>
               )}

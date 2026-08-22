@@ -99,11 +99,11 @@ export function RatingConfigForm({ tournamentId, current }: RatingConfigFormProp
           <input className="rounded-md border border-zinc-300 px-3 py-2" defaultValue={current?.winBonus ?? "10"} name="winBonus" required />
         </label>
         <label className="grid gap-1 text-sm">
-          強い票ポイント
+          1票目でもらえるポイント
           <input className="rounded-md border border-zinc-300 px-3 py-2" defaultValue={current?.strongVotePoints ?? "10"} name="strongVotePoints" required />
         </label>
         <label className="grid gap-1 text-sm">
-          弱い票ポイント
+          2票目でもらえるポイント
           <input className="rounded-md border border-zinc-300 px-3 py-2" defaultValue={current?.weakVotePoints ?? "5"} name="weakVotePoints" required />
         </label>
         <label className="grid gap-1 text-sm">

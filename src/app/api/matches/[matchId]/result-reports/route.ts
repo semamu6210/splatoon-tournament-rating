@@ -9,8 +9,8 @@ export async function POST(request: Request, context: Context) {
     const user = await requireUser();
     const { matchId } = (await context.params) as { matchId: string };
     const body = await readJson<{ reportedWinnerTeam: unknown }>(request);
-    const report = await submitResultReport(user.id, matchId, body.reportedWinnerTeam);
-    return ok({ report }, 201);
+    const match = await submitResultReport(user.id, matchId, body.reportedWinnerTeam, user.role);
+    return ok({ match }, 201);
   } catch (error) {
     return fail(error);
   }

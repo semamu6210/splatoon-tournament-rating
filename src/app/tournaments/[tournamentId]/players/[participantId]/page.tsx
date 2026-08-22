@@ -64,7 +64,7 @@ export default async function PlayerProfilePage({ params }: PageProps) {
         {isMe && (
           <section className="rounded-md border border-zinc-300 bg-white p-4 text-sm">
             <h2 className="text-lg font-semibold">自分だけの情報</h2>
-            <p className="mt-2">STRONG得票: {voteCount("STRONG")} / WEAK得票: {voteCount("WEAK")}</p>
+            <p className="mt-2">1票目得票: {voteCount("STRONG")} / 2票目得票: {voteCount("WEAK")}</p>
             <h3 className="mt-4 font-semibold">レート変動履歴</h3>
             <ul className="mt-2 grid gap-1">
               {histories.map((history) => (

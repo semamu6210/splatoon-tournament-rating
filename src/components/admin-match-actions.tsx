@@ -56,10 +56,10 @@ export function AdminMatchActions({ matchId, stages = [], currentStageId = null 
           試合開始
         </button>
         <button className="rounded-md border border-zinc-300 px-3 py-2 text-sm" onClick={() => void post(`/api/matches/${matchId}/open-result-reporting`)} type="button">
-          勝敗報告開始
+          試合終了（トラブル時）
         </button>
         <button className="rounded-md border border-zinc-300 px-3 py-2 text-sm" onClick={() => void post(`/api/matches/${matchId}/apply-rating`)} type="button">
-          レート確定
+          手動レート確定（トラブル時）
         </button>
       </div>
       <div className="grid gap-2 border-t border-zinc-200 pt-3">

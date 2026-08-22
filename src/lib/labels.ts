@@ -44,8 +44,8 @@ export const matchStatusLabel: Record<MatchStatus, string> = {
 };
 
 export const voteTypeLabel: Record<VoteType, string> = {
-  STRONG: "強い票",
-  WEAK: "弱い票",
+  STRONG: "1票目",
+  WEAK: "2票目",
 };
 
 export const teamLabel: Record<Team, string> = {

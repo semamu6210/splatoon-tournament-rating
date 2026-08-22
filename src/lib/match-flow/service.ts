@@ -1,8 +1,8 @@
-import { MatchStatus, Prisma, type Team, type VoteType } from "@prisma/client";
+import { MatchStatus, Prisma, type Team, type UserRole, type VoteType } from "@prisma/client";
 
 import { ApiError } from "@/lib/http";
-import { autoConfirmWinner } from "@/lib/match-flow/policy";
 import { calculatePlayerRatingResults } from "@/lib/match-flow/rating";
+import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 type Tx = Prisma.TransactionClient;
@@ -45,6 +45,10 @@ async function getMatchWithPlayers(tx: Tx, matchId: string) {
   return match;
 }
 
+function canOperateAsHostOrAdmin(match: { roomHostUserId: string | null }, userId: string | undefined, role: UserRole | undefined) {
+  return Boolean((userId && match.roomHostUserId === userId) || (role && canManage(role)));
+}
+
 export async function startMatch(matchId: string) {
   return prisma.$transaction(async (tx) => {
     const match = await getMatchWithPlayers(tx, matchId);
@@ -62,17 +66,20 @@ export async function startMatch(matchId: string) {
   });
 }
 
-export async function openResultReporting(matchId: string) {
+export async function openResultReporting(matchId: string, userId?: string, role?: UserRole) {
   return prisma.$transaction(async (tx) => {
     const match = await getMatchWithPlayers(tx, matchId);
     if (match.status !== "PLAYING") {
       throw new ApiError(400, "Only PLAYING matches can open result reporting.");
     }
+    if (userId && !canOperateAsHostOrAdmin(match, userId, role)) {
+      throw new ApiError(403, "Only the room host or admin can end the match.");
+    }
     return tx.match.update({ where: { id: matchId }, data: { status: "RESULT_REPORTING" } });
   });
 }
 
-export async function submitResultReport(userId: string, matchId: string, reportedWinnerTeam: unknown) {
+export async function submitResultReport(userId: string, matchId: string, reportedWinnerTeam: unknown, role?: UserRole) {
   const team = assertTeam(reportedWinnerTeam);
   return prisma.$transaction(async (tx) => {
     const match = await getMatchWithPlayers(tx, matchId);
@@ -80,20 +87,22 @@ export async function submitResultReport(userId: string, matchId: string, report
       throw new ApiError(400, "Match is not accepting result reports.");
     }
     if (!match.players.some((player) => player.userId === userId)) {
-      throw new ApiError(403, "Only match players can report results.");
+      if (!role || !canManage(role)) {
+        throw new ApiError(403, "Only match players can report results.");
+      }
     }
-    const report = await tx.matchResultReport.create({
-      data: { matchId, userId, reportedWinnerTeam: team },
+    if (!canOperateAsHostOrAdmin(match, userId, role)) {
+      throw new ApiError(403, "Only the room host or admin can confirm the result.");
+    }
+    await tx.matchResultReport.upsert({
+      where: { matchId_userId: { matchId, userId } },
+      update: { reportedWinnerTeam: team },
+      create: { matchId, userId, reportedWinnerTeam: team },
     });
-    const reports = await tx.matchResultReport.findMany({ where: { matchId } });
-    const autoWinner = autoConfirmWinner(reports, match.players);
-    if (autoWinner) {
-      await tx.match.update({
-        where: { id: matchId },
-        data: { winnerTeam: autoWinner, status: "VOTE_REPORTING" },
-      });
-    }
-    return report;
+    return tx.match.update({
+      where: { id: matchId },
+      data: { winnerTeam: team, status: "VOTE_REPORTING" },
+    });
   });
 }
 
@@ -156,7 +165,7 @@ export async function submitPlayerVotes(userId: string, matchId: string, votes: 
     throw new ApiError(400, "STRONG and WEAK cannot target the same player.");
   }
 
-  return prisma.$transaction(async (tx) => {
+  const submittedVotes = await prisma.$transaction(async (tx) => {
     const match = await getMatchWithPlayers(tx, matchId);
     if (match.status !== "VOTE_REPORTING") {
       throw new ApiError(400, "Match is not accepting player votes.");
@@ -183,6 +192,9 @@ export async function submitPlayerVotes(userId: string, matchId: string, votes: 
     });
     return tx.playerVote.findMany({ where: { matchId, voterUserId: userId } });
   });
+
+  await applyRatingIfAllVotesComplete(matchId);
+  return submittedVotes;
 }
 
 async function getVotesForRating(tx: Tx, matchId: string, playerUserIds: string[], votingClosedAt: Date | null) {
@@ -387,6 +399,34 @@ export async function applyRating(matchId: string) {
       throw new ApiError(409, "Rating application conflicted with another request.");
     }
     throw error;
+  }
+}
+
+async function applyRatingIfAllVotesComplete(matchId: string) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { players: true, playerVotes: true },
+  });
+  if (!match || match.status !== "VOTE_REPORTING" || !match.winnerTeam || match.ratingAppliedAt || match.players.length !== 8) {
+    return;
+  }
+
+  const completeVoterIds = new Set<string>();
+  for (const player of match.players) {
+    const userVotes = match.playerVotes.filter((vote) => vote.voterUserId === player.userId);
+    if (userVotes.some((vote) => vote.voteType === "STRONG") && userVotes.some((vote) => vote.voteType === "WEAK")) {
+      completeVoterIds.add(player.userId);
+    }
+  }
+  if (completeVoterIds.size !== 8) return;
+
+  try {
+    await applyRating(matchId);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) {
+      return;
+    }
+    console.error("Automatic rating application failed.", error);
   }
 }
 

@@ -8,26 +8,26 @@ type PlayerVoteFormProps = { matchId: string; opponents: Opponent[] };
 
 export function PlayerVoteForm({ matchId, opponents }: PlayerVoteFormProps) {
   const router = useRouter();
-  const [strong, setStrong] = useState("");
-  const [weak, setWeak] = useState("");
+  const [firstVote, setFirstVote] = useState("");
+  const [secondVote, setSecondVote] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
 
   function setStrongSafe(userId: string) {
-    setStrong(userId);
+    setFirstVote(userId);
     setConfirming(false);
-    if (weak === userId) setWeak("");
+    if (secondVote === userId) setSecondVote("");
   }
 
   function setWeakSafe(userId: string) {
-    setWeak(userId);
+    setSecondVote(userId);
     setConfirming(false);
-    if (strong === userId) setStrong("");
+    if (firstVote === userId) setFirstVote("");
   }
 
   async function submit() {
-    if (!strong || !weak || strong === weak || pending) return;
+    if (!firstVote || !secondVote || firstVote === secondVote || pending) return;
     setPending(true);
     setMessage(null);
 
@@ -36,8 +36,8 @@ export function PlayerVoteForm({ matchId, opponents }: PlayerVoteFormProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         votes: [
-          { targetUserId: strong, voteType: "STRONG" },
-          { targetUserId: weak, voteType: "WEAK" },
+          { targetUserId: firstVote, voteType: "STRONG" },
+          { targetUserId: secondVote, voteType: "WEAK" },
         ],
       }),
     });
@@ -61,31 +61,31 @@ export function PlayerVoteForm({ matchId, opponents }: PlayerVoteFormProps) {
             <p className="font-semibold">{opponent.label}</p>
             <div className="mt-2 flex gap-2">
               <button
-                className={strong === opponent.userId ? "rounded-md bg-emerald-700 px-3 py-2 text-sm text-white" : "rounded-md border border-zinc-300 px-3 py-2 text-sm"}
+                className={firstVote === opponent.userId ? "rounded-md bg-emerald-700 px-3 py-2 text-sm text-white" : "rounded-md border border-zinc-300 px-3 py-2 text-sm"}
                 onClick={() => setStrongSafe(opponent.userId)}
                 type="button"
               >
-                強い票
+                1票目
               </button>
               <button
-                className={weak === opponent.userId ? "rounded-md bg-amber-700 px-3 py-2 text-sm text-white" : "rounded-md border border-zinc-300 px-3 py-2 text-sm"}
+                className={secondVote === opponent.userId ? "rounded-md bg-amber-700 px-3 py-2 text-sm text-white" : "rounded-md border border-zinc-300 px-3 py-2 text-sm"}
                 onClick={() => setWeakSafe(opponent.userId)}
                 type="button"
               >
-                弱い票
+                2票目
               </button>
             </div>
           </div>
         ))}
       </div>
       <div className="rounded-md bg-zinc-50 p-3 text-sm">
-        <p>強い票: {opponents.find((opponent) => opponent.userId === strong)?.label ?? "未選択"}</p>
-        <p>弱い票: {opponents.find((opponent) => opponent.userId === weak)?.label ?? "未選択"}</p>
+        <p>1票目: {opponents.find((opponent) => opponent.userId === firstVote)?.label ?? "未選択"}</p>
+        <p>2票目: {opponents.find((opponent) => opponent.userId === secondVote)?.label ?? "未選択"}</p>
       </div>
       {!confirming ? (
         <button
           className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-zinc-400"
-          disabled={!strong || !weak || strong === weak}
+          disabled={!firstVote || !secondVote || firstVote === secondVote}
           onClick={() => setConfirming(true)}
           type="button"
         >
@@ -94,12 +94,12 @@ export function PlayerVoteForm({ matchId, opponents }: PlayerVoteFormProps) {
       ) : (
         <div className="grid gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
           <div>
-            <p className="font-semibold">強い票:</p>
-            <p>{opponents.find((opponent) => opponent.userId === strong)?.label}</p>
+            <p className="font-semibold">1票目:</p>
+            <p>{opponents.find((opponent) => opponent.userId === firstVote)?.label}</p>
           </div>
           <div>
-            <p className="font-semibold">弱い票:</p>
-            <p>{opponents.find((opponent) => opponent.userId === weak)?.label}</p>
+            <p className="font-semibold">2票目:</p>
+            <p>{opponents.find((opponent) => opponent.userId === secondVote)?.label}</p>
           </div>
           <p className="font-semibold text-amber-900">送信後は変更できません</p>
           <div className="flex flex-col gap-2 sm:flex-row">

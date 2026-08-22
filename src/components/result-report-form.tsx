@@ -34,13 +34,18 @@ export function ResultReportForm({ matchId }: ResultReportFormProps) {
 
   return (
     <div className="grid gap-3 rounded-md border border-zinc-300 bg-white p-4">
-      <h2 className="text-lg font-semibold">勝敗報告</h2>
-      <select className="rounded-md border border-zinc-300 px-3 py-2" onChange={(e) => setWinner(e.target.value as "A" | "B")} value={winner}>
-        <option value="A">チームA 勝利</option>
-        <option value="B">チームB 勝利</option>
-      </select>
+      <h2 className="text-lg font-semibold">試合結果入力</h2>
+      <fieldset className="grid gap-2">
+        <legend className="text-sm font-semibold">勝ったチーム</legend>
+        {(["A", "B"] as const).map((team) => (
+          <label className="flex items-center gap-2 rounded-md border border-zinc-300 px-3 py-2 text-sm" key={team}>
+            <input checked={winner === team} onChange={() => setWinner(team)} type="radio" />
+            チーム{team}
+          </label>
+        ))}
+      </fieldset>
       <button className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-zinc-400" disabled={pending} onClick={() => void submit()} type="button">
-        {pending ? "送信中..." : "報告する"}
+        {pending ? "送信中..." : "試合結果を確定"}
       </button>
       {message && <p className="text-sm text-zinc-700">{message}</p>}
     </div>

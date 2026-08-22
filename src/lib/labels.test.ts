@@ -26,8 +26,8 @@ describe("Japanese labels", () => {
   });
 
   it("maps votes, teams, and roles to Japanese labels", () => {
-    expect(voteTypeLabel.STRONG).toBe("強い票");
-    expect(voteTypeLabel.WEAK).toBe("弱い票");
+    expect(voteTypeLabel.STRONG).toBe("1票目");
+    expect(voteTypeLabel.WEAK).toBe("2票目");
     expect(teamLabel.A).toBe("チームA");
     expect(teamLabel.B).toBe("チームB");
     expect(userRoleLabel.PLAYER).toBe("参加者");

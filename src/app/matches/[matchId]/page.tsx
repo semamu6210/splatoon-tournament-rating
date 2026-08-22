@@ -1,8 +1,12 @@
 import Link from "next/link";
 import Image from "next/image";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 import { AdminMatchActions } from "@/components/admin-match-actions";
+import { ApiButton } from "@/components/api-button";
 import { AuthControls } from "@/components/auth-controls";
+import { MatchStatusRefresh } from "@/components/match-status-refresh";
 import { PlayerVoteForm } from "@/components/player-vote-form";
 import { ResultReportForm } from "@/components/result-report-form";
 import { auth } from "@/auth";
@@ -17,6 +21,11 @@ export const dynamic = "force-dynamic";
 type PageProps = {
   params: Promise<{ matchId: string }>;
 };
+
+function publicImageExists(imagePath: string | null) {
+  if (!imagePath?.startsWith("/stages/")) return false;
+  return existsSync(join(process.cwd(), "public", imagePath.slice(1)));
+}
 
 export default async function MatchPage({ params }: PageProps) {
   const { matchId } = await params;
@@ -99,15 +108,25 @@ export default async function MatchPage({ params }: PageProps) {
         }))
     : [];
   const myHistory = user ? match.ratingHistories.find((history) => history.userId === user.id) : null;
-  const voteSubmittedUserIds = new Set(match.playerVotes.map((vote) => vote.voterUserId));
+  const completeVoteSubmittedUserIds = new Set(
+    match.players
+      .filter((player) => {
+        const votes = match.playerVotes.filter((vote) => vote.voterUserId === player.userId);
+        return votes.some((vote) => vote.voteType === "STRONG") && votes.some((vote) => vote.voteType === "WEAK");
+      })
+      .map((player) => player.userId),
+  );
   const myVotes = user ? match.playerVotes.filter((vote) => vote.voterUserId === user.id) : [];
   const myVoteComplete =
     myVotes.some((vote) => vote.voteType === "STRONG") && myVotes.some((vote) => vote.voteType === "WEAK");
-  const imagePath = stageImagePath(match.stageName);
+  const imagePath = stageImagePath(match.stage?.name ?? match.stageName);
+  const visibleImagePath = publicImageExists(imagePath) ? imagePath : null;
   const hostLabel = match.roomHost
     ? match.roomHost.discordUsername ?? match.roomHost.name ?? match.roomHost.id
     : "未設定";
   const isRoomHost = Boolean(user && match.roomHostUserId === user.id);
+  const shouldAutoRefresh = ["PLAYING", "RESULT_REPORTING", "VOTE_REPORTING"].includes(match.status);
+  const myParticipant = myPlayer ? participantByUserId.get(myPlayer.userId) : null;
   const playerLabel = (player: (typeof match.players)[number]) =>
     participantByUserId.get(player.userId)?.participantName ?? player.user.discordUsername ?? player.user.name ?? player.userId;
   const playerCard = (player: (typeof match.players)[number], showRecent: boolean) => {
@@ -154,6 +173,7 @@ export default async function MatchPage({ params }: PageProps) {
 
   return (
     <main className="min-h-screen px-5 py-8">
+      <MatchStatusRefresh enabled={shouldAutoRefresh} />
       <section className="mx-auto grid max-w-4xl gap-6">
         <header className="flex flex-col gap-4 border-b border-zinc-300 pb-5">
           <Link className="text-sm text-zinc-600" href={`/tournaments/${match.tournamentId}`}>← 大会へ</Link>
@@ -175,10 +195,10 @@ export default async function MatchPage({ params }: PageProps) {
             <h2 className="mt-1 text-2xl font-bold text-emerald-950">試合 #{match.matchNumber ?? "-"}</h2>
           </div>
           <div className="overflow-hidden rounded-md border border-zinc-200 bg-white">
-            {imagePath ? (
-              <Image alt={`${match.stageName}のステージ画像`} className="h-auto w-full object-cover" height={720} priority src={imagePath} width={1280} />
+            {visibleImagePath ? (
+              <Image alt={`${match.stageName}のステージ画像`} className="h-auto w-full object-cover" height={720} priority src={visibleImagePath} width={1280} />
             ) : (
-              <div className="flex aspect-video items-center justify-center bg-zinc-100 text-sm text-zinc-600">ステージ画像未設定</div>
+              <div className="flex aspect-video items-center justify-center bg-zinc-100 text-sm text-zinc-600">ステージ画像を準備中です</div>
             )}
           </div>
           <div className="grid gap-2 text-sm">
@@ -264,41 +284,63 @@ export default async function MatchPage({ params }: PageProps) {
         )}
 
         {match.status === "PLAYING" && (
-          <section className="rounded-md border border-zinc-300 bg-white p-4">
+          <section className="grid gap-3 rounded-md border border-zinc-300 bg-white p-4">
             <h2 className="text-lg font-semibold">試合中</h2>
-            <p className="mt-2 text-sm text-zinc-600">試合終了後、管理者が勝敗報告を開始します。</p>
+            <p className="text-sm text-zinc-600">Splatoonでの試合が終わったら、部屋主が試合終了を押してください。</p>
+            {isRoomHost && (
+              <ApiButton url={`/api/matches/${match.id}/open-result-reporting`}>
+                試合終了
+              </ApiButton>
+            )}
+            {!isRoomHost && <p className="text-sm text-zinc-600">部屋主の{hostLabel}さんが試合終了操作を行います。</p>}
           </section>
         )}
 
-        {match.status === "RESULT_REPORTING" && myPlayer && <ResultReportForm matchId={match.id} />}
+        {match.status === "RESULT_REPORTING" && myPlayer && (
+          isRoomHost ? (
+            <ResultReportForm matchId={match.id} />
+          ) : (
+            <section className="rounded-md border border-zinc-300 bg-white p-4">
+              <h2 className="text-lg font-semibold">試合終了・結果入力待ち</h2>
+              <p className="mt-2 text-sm text-zinc-600">部屋主の{hostLabel}さんが試合結果を入力しています。</p>
+            </section>
+          )
+        )}
 
         {match.status === "VOTE_REPORTING" && myPlayer && (
           <section className="grid gap-3">
             <div className="rounded-md border border-zinc-300 bg-white p-4 text-sm">
               <p>自分の投票状態: {myVoteComplete ? "投票済み" : "未投票"}</p>
+              <p>投票完了: {completeVoteSubmittedUserIds.size} / 8</p>
               <p>投票受付: {match.votingClosedAt ? `締切済み (${match.votingClosedAt.toLocaleString("ja-JP")})` : "受付中"}</p>
             </div>
             {!match.votingClosedAt && !myVoteComplete && <PlayerVoteForm matchId={match.id} opponents={opponents} />}
+            {!match.votingClosedAt && myVoteComplete && <p className="text-sm text-zinc-600">他の参加者の投票を待っています。</p>}
             {match.votingClosedAt && <p className="text-sm text-zinc-600">ADMINにより投票受付は締め切られました。</p>}
           </section>
         )}
 
         {match.status === "CONFIRMED" && myHistory && (
           <section className="rounded-md border border-zinc-300 bg-white p-4">
-            <h2 className="text-lg font-semibold">自分のレート変動</h2>
+            <h2 className="text-lg font-semibold">試合終了</h2>
             <dl className="mt-3 grid gap-2 text-sm">
+              <div>勝敗: {myPlayer && match.winnerTeam === myPlayer.team ? "勝利" : "敗北"}</div>
               <div>試合前レート: {formatRating(myHistory.ratingBefore)}</div>
-              <div>強い票: {myHistory.strongVotesReceived}</div>
-              <div>弱い票: {myHistory.weakVotesReceived}</div>
-              <div>強い票ポイント: {formatRating(myHistory.strongVotePointsUsed)}</div>
-              <div>弱い票ポイント: {formatRating(myHistory.weakVotePointsUsed)}</div>
+              <div>今回の増加: +{formatRating(myHistory.finalDelta)}</div>
+              <div>現在レート: {formatRating(myParticipant?.rating ?? myHistory.ratingAfter)}</div>
+              <div>1票目を受けた数: {myHistory.strongVotesReceived}</div>
+              <div>2票目を受けた数: {myHistory.weakVotesReceived}</div>
+              <div>1票目でもらえるポイント: {formatRating(myHistory.strongVotePointsUsed)}</div>
+              <div>2票目でもらえるポイント: {formatRating(myHistory.weakVotePointsUsed)}</div>
               <div>投票ポイント: +{formatRating(myHistory.votePoints)}</div>
               <div>勝利ポイント: +{formatRating(myHistory.winBonusUsed)}</div>
               <div>XP: {myHistory.areaXpUsed}</div>
               <div>XP倍率: x{formatRating(myHistory.xpMultiplierUsed)}</div>
-              <div>増加: +{formatRating(myHistory.finalDelta)}</div>
               <div>試合後レート: {formatRating(myHistory.ratingAfter)}</div>
             </dl>
+            <Link className="mt-4 inline-flex rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white" href={`/tournaments/${match.tournamentId}`}>
+              次のマッチングへ
+            </Link>
           </section>
         )}
 
@@ -315,7 +357,7 @@ export default async function MatchPage({ params }: PageProps) {
                 <p>部屋コード: {match.privateRoomCode ?? "未設定"}</p>
                 <p>部屋作成担当: {hostLabel}</p>
                 <p>使用ステージ: {match.stageName ?? "未設定"}</p>
-                <p>投票済み: {voteSubmittedUserIds.size} / 8</p>
+                <p>投票済み: {completeVoteSubmittedUserIds.size} / 8</p>
               </div>
               <h3 className="mt-4 font-semibold">勝敗報告</h3>
               <ul className="mt-2 grid gap-1 text-sm">
@@ -333,7 +375,7 @@ export default async function MatchPage({ params }: PageProps) {
                 {match.players.map((player) => (
                   <li key={player.userId}>
                     {player.user.discordUsername ?? player.user.name ?? player.userId}:{" "}
-                    {voteSubmittedUserIds.has(player.userId) ? "提出済み" : "未提出"}
+                    {completeVoteSubmittedUserIds.has(player.userId) ? "提出済み" : "未提出"}
                   </li>
                 ))}
               </ul>

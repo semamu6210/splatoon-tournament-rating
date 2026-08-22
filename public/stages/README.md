@@ -7,7 +7,7 @@
 ```text
 public/stages/yunohana.webp
 public/stages/gonzui.webp
-public/stages/yagara.webp
+public/stages/yagara-market.webp
 ```
 
 ステージ名と画像ファイルの紐付けは `src/lib/stages.ts` の `STAGE_DEFINITIONS` で管理します。
