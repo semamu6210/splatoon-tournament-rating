@@ -125,6 +125,13 @@ export async function getMatchViewForUser(matchId: string, user: AuthenticatedUs
             votePoints: serializeDecimal(myHistory.votePoints),
             baseDelta: serializeDecimal(myHistory.baseDelta),
             xpMultiplierUsed: serializeDecimal(myHistory.xpMultiplierUsed),
+            winningStreakBefore: myHistory.winningStreakBefore,
+            winningStreakAfter: myHistory.winningStreakAfter,
+            winningStreakBonusApplied: myHistory.winningStreakBonusApplied,
+            winningStreakBonusMultiplierUsed: serializeDecimal(myHistory.winningStreakBonusMultiplierUsed),
+            totalVotesReceived: myHistory.totalVotesReceived,
+            voteCountBonusApplied: myHistory.voteCountBonusApplied,
+            voteCountBonusMultiplierUsed: serializeDecimal(myHistory.voteCountBonusMultiplierUsed),
             finalDelta: serializeDecimal(myHistory.finalDelta),
             ratingAfter: serializeDecimal(myHistory.ratingAfter),
           }

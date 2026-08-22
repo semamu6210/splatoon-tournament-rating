@@ -263,6 +263,12 @@ model TournamentRatingConfig {
   weakVotePoints               Decimal                      @db.Decimal(12, 2)
   losingStreakPenalty          Decimal                      @db.Decimal(12, 2)
   xpTierStepSize               Int
+  winningStreakBonusEnabled    Boolean                      @default(false)
+  winningStreakBonusMultiplier Decimal                      @default(1.20) @db.Decimal(8, 4)
+  winningStreakThreshold       Int                          @default(3)
+  voteCountBonusEnabled        Boolean                      @default(false)
+  voteCountBonusMultiplier     Decimal                      @default(1.20) @db.Decimal(8, 4)
+  voteCountBonusThreshold      Int                          @default(3)
   isActive                     Boolean                      @default(false)
   createdAt                    DateTime                     @default(now())
   updatedAt                    DateTime                     @updatedAt
@@ -482,6 +488,13 @@ model RatingHistory {
   xpTierMinUsed           Int?
   xpTierMaxUsed           Int?
   xpMultiplierUsed        Decimal                @db.Decimal(8, 4)
+  winningStreakBefore     Int                    @default(0)
+  winningStreakAfter      Int                    @default(0)
+  winningStreakBonusApplied Boolean               @default(false)
+  winningStreakBonusMultiplierUsed Decimal        @default(1.00) @db.Decimal(8, 4)
+  totalVotesReceived      Int                    @default(0)
+  voteCountBonusApplied   Boolean                @default(false)
+  voteCountBonusMultiplierUsed Decimal           @default(1.00) @db.Decimal(8, 4)
   finalDelta              Decimal                @db.Decimal(12, 2)
   ratingAfter             Decimal                @db.Decimal(12, 2)
   createdAt               DateTime               @default(now())

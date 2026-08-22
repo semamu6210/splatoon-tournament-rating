@@ -15,6 +15,12 @@ export type RatingConfigInput = {
   weakVotePoints: unknown;
   losingStreakPenalty: unknown;
   xpTierStepSize: unknown;
+  winningStreakBonusEnabled?: unknown;
+  winningStreakBonusMultiplier?: unknown;
+  winningStreakThreshold?: unknown;
+  voteCountBonusEnabled?: unknown;
+  voteCountBonusMultiplier?: unknown;
+  voteCountBonusThreshold?: unknown;
   multipliers: unknown;
 };
 
@@ -25,6 +31,12 @@ export type NormalizedRatingConfigInput = {
   weakVotePoints: string;
   losingStreakPenalty: string;
   xpTierStepSize: 50 | 100;
+  winningStreakBonusEnabled: boolean;
+  winningStreakBonusMultiplier: string;
+  winningStreakThreshold: number;
+  voteCountBonusEnabled: boolean;
+  voteCountBonusMultiplier: string;
+  voteCountBonusThreshold: number;
   tiers: Array<{
     minXp: number | null;
     maxXp: number | null;
@@ -32,6 +44,19 @@ export type NormalizedRatingConfigInput = {
     sortOrder: number;
   }>;
 };
+
+function booleanValue(value: unknown) {
+  return value === true || value === "true" || value === "on";
+}
+
+function positiveInteger(value: unknown, field: string, defaultValue: number) {
+  if (value === undefined || value === null || value === "") return defaultValue;
+  const numberValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(numberValue) || numberValue <= 0) {
+    throw new ApiError(400, `${field} must be a positive integer.`);
+  }
+  return numberValue;
+}
 
 type MultiplierInput = {
   sortOrder?: unknown;
@@ -88,6 +113,12 @@ export function normalizeRatingConfigInput(input: RatingConfigInput): Normalized
     weakVotePoints: nonNegativeDecimalString(input.weakVotePoints, "weakVotePoints"),
     losingStreakPenalty: nonNegativeDecimalString(input.losingStreakPenalty, "losingStreakPenalty"),
     xpTierStepSize,
+    winningStreakBonusEnabled: booleanValue(input.winningStreakBonusEnabled),
+    winningStreakBonusMultiplier: positiveDecimalString(input.winningStreakBonusMultiplier ?? "1.2", "winningStreakBonusMultiplier"),
+    winningStreakThreshold: positiveInteger(input.winningStreakThreshold, "winningStreakThreshold", 3),
+    voteCountBonusEnabled: booleanValue(input.voteCountBonusEnabled),
+    voteCountBonusMultiplier: positiveDecimalString(input.voteCountBonusMultiplier ?? "1.2", "voteCountBonusMultiplier"),
+    voteCountBonusThreshold: positiveInteger(input.voteCountBonusThreshold, "voteCountBonusThreshold", 3),
     tiers,
   };
 }
@@ -117,6 +148,18 @@ export function validateCompleteRatingConfig(
 
   if (config.xpTierStepSize !== 50 && config.xpTierStepSize !== 100) {
     throw new ApiError(400, "xpTierStepSize is invalid.");
+  }
+  if (new Prisma.Decimal(config.winningStreakBonusMultiplier).lte(0)) {
+    throw new ApiError(400, "winningStreakBonusMultiplier is invalid.");
+  }
+  if (config.winningStreakThreshold <= 0) {
+    throw new ApiError(400, "winningStreakThreshold is invalid.");
+  }
+  if (new Prisma.Decimal(config.voteCountBonusMultiplier).lte(0)) {
+    throw new ApiError(400, "voteCountBonusMultiplier is invalid.");
+  }
+  if (config.voteCountBonusThreshold <= 0) {
+    throw new ApiError(400, "voteCountBonusThreshold is invalid.");
   }
 
   const expected = buildXpTierRanges(config.xpTierStepSize);
@@ -163,6 +206,12 @@ export function configSnapshot(
     weakVotePoints: config.weakVotePoints.toString(),
     losingStreakPenalty: config.losingStreakPenalty.toString(),
     xpTierStepSize: config.xpTierStepSize,
+    winningStreakBonusEnabled: config.winningStreakBonusEnabled,
+    winningStreakBonusMultiplier: config.winningStreakBonusMultiplier.toString(),
+    winningStreakThreshold: config.winningStreakThreshold,
+    voteCountBonusEnabled: config.voteCountBonusEnabled,
+    voteCountBonusMultiplier: config.voteCountBonusMultiplier.toString(),
+    voteCountBonusThreshold: config.voteCountBonusThreshold,
     isActive: config.isActive,
     xpMultiplierTiers: config.xpMultiplierTiers
       .slice()

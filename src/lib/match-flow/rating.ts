@@ -17,6 +17,13 @@ export type PlayerRatingResult = {
   xpTierMinUsed: number | null;
   xpTierMaxUsed: number | null;
   xpMultiplierUsed: Prisma.Decimal;
+  winningStreakBefore: number;
+  winningStreakAfter: number;
+  winningStreakBonusApplied: boolean;
+  winningStreakBonusMultiplierUsed: Prisma.Decimal;
+  totalVotesReceived: number;
+  voteCountBonusApplied: boolean;
+  voteCountBonusMultiplierUsed: Prisma.Decimal;
   finalDelta: Prisma.Decimal;
   ratingAfter: Prisma.Decimal;
   won: boolean;
@@ -26,9 +33,12 @@ export function calculatePlayerRatingResults(params: {
   players: MatchPlayer[];
   votes: PlayerVote[];
   config: TournamentRatingConfig;
+  participantStreaks: Array<{ userId: string; winningStreak: number }>;
   xpTiers: TournamentXpMultiplierTier[];
   winnerTeam: Team;
 }) {
+  const winningStreakByUserId = new Map(params.participantStreaks.map((participant) => [participant.userId, participant.winningStreak]));
+
   return params.players.map((player): PlayerRatingResult => {
     const strongVotesReceived = params.votes.filter(
       (vote) => vote.targetUserId === player.userId && vote.voteType === "STRONG",
@@ -36,6 +46,7 @@ export function calculatePlayerRatingResults(params: {
     const weakVotesReceived = params.votes.filter(
       (vote) => vote.targetUserId === player.userId && vote.voteType === "WEAK",
     ).length;
+    const totalVotesReceived = strongVotesReceived + weakVotesReceived;
     const strongVotePointsUsed = new Prisma.Decimal(params.config.strongVotePoints);
     const weakVotePointsUsed = new Prisma.Decimal(params.config.weakVotePoints);
     const votePoints = strongVotePointsUsed
@@ -46,7 +57,20 @@ export function calculatePlayerRatingResults(params: {
     const baseDelta = votePoints.add(winBonusUsed);
     const tier = findXpTier(player.areaXpAtMatch, params.xpTiers);
     const xpMultiplierUsed = new Prisma.Decimal(tier.multiplier);
-    const finalDelta = baseDelta.mul(xpMultiplierUsed);
+    const xpAdjustedDelta = baseDelta.mul(xpMultiplierUsed);
+    const winningStreakBefore = winningStreakByUserId.get(player.userId) ?? 0;
+    const winningStreakAfter = won ? winningStreakBefore + 1 : 0;
+    const winningStreakBonusApplied =
+      params.config.winningStreakBonusEnabled && won && winningStreakAfter >= params.config.winningStreakThreshold;
+    const winningStreakBonusMultiplierUsed = winningStreakBonusApplied
+      ? new Prisma.Decimal(params.config.winningStreakBonusMultiplier)
+      : new Prisma.Decimal(1);
+    const voteCountBonusApplied =
+      params.config.voteCountBonusEnabled && totalVotesReceived >= params.config.voteCountBonusThreshold;
+    const voteCountBonusMultiplierUsed = voteCountBonusApplied
+      ? new Prisma.Decimal(params.config.voteCountBonusMultiplier)
+      : new Prisma.Decimal(1);
+    const finalDelta = xpAdjustedDelta.mul(winningStreakBonusMultiplierUsed).mul(voteCountBonusMultiplierUsed);
     const ratingBefore = new Prisma.Decimal(player.ratingBefore);
     const ratingAfter = ratingBefore.add(finalDelta);
 
@@ -65,6 +89,13 @@ export function calculatePlayerRatingResults(params: {
       xpTierMinUsed: tier.minXp,
       xpTierMaxUsed: tier.maxXp,
       xpMultiplierUsed,
+      winningStreakBefore,
+      winningStreakAfter,
+      winningStreakBonusApplied,
+      winningStreakBonusMultiplierUsed,
+      totalVotesReceived,
+      voteCountBonusApplied,
+      voteCountBonusMultiplierUsed,
       finalDelta,
       ratingAfter,
       won,

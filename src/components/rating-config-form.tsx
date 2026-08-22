@@ -15,6 +15,12 @@ type RatingConfigFormProps = {
     weakVotePoints: string;
     losingStreakPenalty: string;
     xpTierStepSize: number;
+    winningStreakBonusEnabled: boolean;
+    winningStreakBonusMultiplier: string;
+    winningStreakThreshold: number;
+    voteCountBonusEnabled: boolean;
+    voteCountBonusMultiplier: string;
+    voteCountBonusThreshold: number;
     xpMultiplierTiers?: Array<{
       minXp: number | null;
       maxXp: number | null;
@@ -60,6 +66,12 @@ export function RatingConfigForm({ tournamentId, current }: RatingConfigFormProp
       weakVotePoints: form.get("weakVotePoints"),
       losingStreakPenalty: form.get("losingStreakPenalty"),
       xpTierStepSize: stepSize,
+      winningStreakBonusEnabled: form.get("winningStreakBonusEnabled") === "on",
+      winningStreakBonusMultiplier: form.get("winningStreakBonusMultiplier"),
+      winningStreakThreshold: Number(form.get("winningStreakThreshold") ?? 3),
+      voteCountBonusEnabled: form.get("voteCountBonusEnabled") === "on",
+      voteCountBonusMultiplier: form.get("voteCountBonusMultiplier"),
+      voteCountBonusThreshold: Number(form.get("voteCountBonusThreshold") ?? 3),
       multipliers,
     };
 
@@ -121,6 +133,53 @@ export function RatingConfigForm({ tournamentId, current }: RatingConfigFormProp
             <option value={50}>50</option>
           </select>
         </label>
+      </div>
+
+      <div className="grid gap-3 rounded-md border border-zinc-300 bg-white p-4 text-sm">
+        <label className="flex items-start gap-3">
+          <input
+            className="mt-1"
+            defaultChecked={current?.winningStreakBonusEnabled ?? false}
+            name="winningStreakBonusEnabled"
+            type="checkbox"
+          />
+          <span>
+            <span className="block font-semibold">3連勝以上ボーナスを有効にする</span>
+            <span className="block text-zinc-600">3連勝以上で ×1.2</span>
+          </span>
+        </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="grid gap-1">
+            連勝条件
+            <input className="rounded-md border border-zinc-300 px-3 py-2" defaultValue={current?.winningStreakThreshold ?? 3} name="winningStreakThreshold" required type="number" min={1} />
+          </label>
+          <label className="grid gap-1">
+            連勝ボーナス倍率
+            <input className="rounded-md border border-zinc-300 px-3 py-2" defaultValue={current?.winningStreakBonusMultiplier ?? "1.2"} name="winningStreakBonusMultiplier" required />
+          </label>
+        </div>
+        <label className="flex items-start gap-3">
+          <input
+            className="mt-1"
+            defaultChecked={current?.voteCountBonusEnabled ?? false}
+            name="voteCountBonusEnabled"
+            type="checkbox"
+          />
+          <span>
+            <span className="block font-semibold">総得票3票以上ボーナスを有効にする</span>
+            <span className="block text-zinc-600">1票目+2票目が3票以上で ×1.2</span>
+          </span>
+        </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="grid gap-1">
+            得票条件
+            <input className="rounded-md border border-zinc-300 px-3 py-2" defaultValue={current?.voteCountBonusThreshold ?? 3} name="voteCountBonusThreshold" required type="number" min={1} />
+          </label>
+          <label className="grid gap-1">
+            得票ボーナス倍率
+            <input className="rounded-md border border-zinc-300 px-3 py-2" defaultValue={current?.voteCountBonusMultiplier ?? "1.2"} name="voteCountBonusMultiplier" required />
+          </label>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-md border border-zinc-300 bg-white">

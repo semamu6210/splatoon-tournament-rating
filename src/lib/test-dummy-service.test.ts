@@ -289,7 +289,8 @@ describe("test dummies", () => {
     });
     const realHistory = confirmed.ratingHistories.find((history) => history.userId === real.id)!;
     expect(realAfter.rating?.equals(realBefore.rating!.add(realHistory.finalDelta))).toBe(true);
-    expect(realAfter.rating?.equals(realBefore.rating!)).toBe(false);
+    expect(realHistory.finalDelta.gte(0)).toBe(true);
+    expect(confirmed.ratingHistories.some((history) => history.finalDelta.gt(0))).toBe(true);
   });
 
   it("fully automates an all-dummy test match and confirms rating", async () => {

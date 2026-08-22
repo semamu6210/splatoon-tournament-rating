@@ -364,8 +364,21 @@ export default async function MatchPage({ params }: PageProps) {
                 <div>2票目でもらえるポイント: {formatRating(myHistory.weakVotePointsUsed)}</div>
                 <div>投票ポイント: +{formatRating(myHistory.votePoints)}</div>
                 <div>勝利ポイント: +{formatRating(myHistory.winBonusUsed)}</div>
+                <div>基本増加: +{formatRating(myHistory.baseDelta)}</div>
                 <div>XP: {myHistory.areaXpUsed}</div>
-                <div>XP倍率: x{formatRating(myHistory.xpMultiplierUsed)}</div>
+                <div>XP倍率: ×{formatRating(myHistory.xpMultiplierUsed)}</div>
+                {myHistory.winningStreakBonusApplied && (
+                  <div>
+                    3連勝ボーナス: ×{formatRating(myHistory.winningStreakBonusMultiplierUsed)} ({myHistory.winningStreakBefore}→
+                    {myHistory.winningStreakAfter}連勝)
+                  </div>
+                )}
+                {myHistory.voteCountBonusApplied && (
+                  <div>
+                    高得票ボーナス: ×{formatRating(myHistory.voteCountBonusMultiplierUsed)} ({myHistory.totalVotesReceived}票)
+                  </div>
+                )}
+                <div>最終増加: +{formatRating(myHistory.finalDelta)}</div>
                 <div>試合後レート: {formatRating(myHistory.ratingAfter)}</div>
               </dl>
             )}

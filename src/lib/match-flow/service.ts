@@ -376,18 +376,22 @@ async function applyRatingOnce(matchId: string) {
         });
         await touchMatchStatusEventTx(tx, matchId, updated);
       }
+      const participants = await tx.tournamentParticipant.findMany({
+        where: {
+          tournamentId: match.tournamentId,
+          userId: { in: playerUserIds },
+        },
+      });
       const results = calculatePlayerRatingResults({
         players: match.players,
         votes,
         config: match.ratingConfig,
+        participantStreaks: participants.map((participant) => ({
+          userId: participant.userId,
+          winningStreak: participant.winningStreak,
+        })),
         xpTiers: match.ratingConfig.xpMultiplierTiers,
         winnerTeam: match.winnerTeam,
-      });
-      const participants = await tx.tournamentParticipant.findMany({
-        where: {
-          tournamentId: match.tournamentId,
-          userId: { in: results.map((result) => result.userId) },
-        },
       });
       const participantByUserId = new Map(participants.map((participant) => [participant.userId, participant]));
 
@@ -418,6 +422,13 @@ async function applyRatingOnce(matchId: string) {
             xpTierMinUsed: result.xpTierMinUsed,
             xpTierMaxUsed: result.xpTierMaxUsed,
             xpMultiplierUsed: result.xpMultiplierUsed,
+            winningStreakBefore: result.winningStreakBefore,
+            winningStreakAfter: result.winningStreakAfter,
+            winningStreakBonusApplied: result.winningStreakBonusApplied,
+            winningStreakBonusMultiplierUsed: result.winningStreakBonusMultiplierUsed,
+            totalVotesReceived: result.totalVotesReceived,
+            voteCountBonusApplied: result.voteCountBonusApplied,
+            voteCountBonusMultiplierUsed: result.voteCountBonusMultiplierUsed,
             finalDelta: result.finalDelta,
             ratingAfter: result.ratingAfter,
           },

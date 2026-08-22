@@ -294,6 +294,12 @@ export async function createRatingConfigVersion(
         weakVotePoints: normalized.weakVotePoints,
         losingStreakPenalty: normalized.losingStreakPenalty,
         xpTierStepSize: normalized.xpTierStepSize,
+        winningStreakBonusEnabled: normalized.winningStreakBonusEnabled,
+        winningStreakBonusMultiplier: normalized.winningStreakBonusMultiplier,
+        winningStreakThreshold: normalized.winningStreakThreshold,
+        voteCountBonusEnabled: normalized.voteCountBonusEnabled,
+        voteCountBonusMultiplier: normalized.voteCountBonusMultiplier,
+        voteCountBonusThreshold: normalized.voteCountBonusThreshold,
         isActive: true,
         xpMultiplierTiers: {
           create: normalized.tiers.map((tier) => ({

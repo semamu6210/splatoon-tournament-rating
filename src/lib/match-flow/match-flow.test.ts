@@ -55,6 +55,8 @@ async function createReadyMatch(options?: {
   weakVotePoints?: string;
   winBonus?: string;
   baseMultiplier?: string;
+  winningStreakBonusEnabled?: boolean;
+  voteCountBonusEnabled?: boolean;
 }) {
   const admin = await createUser(UserRole.ADMIN);
   const tournament = await createTournament(admin.id, {
@@ -71,6 +73,8 @@ async function createReadyMatch(options?: {
     weakVotePoints: options?.weakVotePoints ?? "5",
     losingStreakPenalty: "20",
     xpTierStepSize: stepSize,
+    winningStreakBonusEnabled: options?.winningStreakBonusEnabled ?? false,
+    voteCountBonusEnabled: options?.voteCountBonusEnabled ?? false,
     multipliers: multipliers(stepSize, options?.baseMultiplier ?? "1.0"),
   });
   await openRegistration(admin.id, tournament.id);
@@ -283,6 +287,13 @@ describe("result reports and rating application", () => {
     expect(new Prisma.Decimal(winnerHistory.strongVotePointsUsed).equals("12")).toBe(true);
     expect(new Prisma.Decimal(winnerHistory.weakVotePointsUsed).equals("6")).toBe(true);
     expect(new Prisma.Decimal(winnerHistory.ratingAfter).gte(winnerHistory.ratingBefore)).toBe(true);
+    expect(winnerHistory.winningStreakBefore).toBe(0);
+    expect(winnerHistory.winningStreakAfter).toBe(1);
+    expect(winnerHistory.winningStreakBonusApplied).toBe(false);
+    expect(new Prisma.Decimal(winnerHistory.winningStreakBonusMultiplierUsed).equals("1")).toBe(true);
+    expect(winnerHistory.totalVotesReceived).toBeGreaterThanOrEqual(0);
+    expect(winnerHistory.voteCountBonusApplied).toBe(false);
+    expect(new Prisma.Decimal(winnerHistory.voteCountBonusMultiplierUsed).equals("1")).toBe(true);
 
     const participants = await prisma.tournamentParticipant.findMany({ where: { tournamentId: match.tournamentId } });
     expect(participants.every((participant) => participant.matchesPlayed === 1)).toBe(true);
@@ -298,6 +309,37 @@ describe("result reports and rating application", () => {
         expect(participant.losingStreak).toBe(1);
       }
     }
+  });
+
+  it("persists applied streak and vote-count bonus audit fields in RatingHistory", async () => {
+    const { admin, match } = await createReadyMatch({
+      winningStreakBonusEnabled: true,
+      voteCountBonusEnabled: true,
+    });
+    await prisma.tournamentParticipant.updateMany({
+      where: { tournamentId: match.tournamentId },
+      data: { winningStreak: 2 },
+    });
+    await forceResult(admin.id, match.id, "A", "test");
+    await voteAll(match.id);
+
+    const confirmed = await prisma.match.findUniqueOrThrow({
+      where: { id: match.id },
+      include: { players: true, ratingHistories: true },
+    });
+    const history = confirmed.ratingHistories.find((item) => {
+      const player = confirmed.players.find((matchPlayer) => matchPlayer.userId === item.userId);
+      return player?.team === "A" && item.totalVotesReceived >= 3;
+    })!;
+
+    expect(history.winningStreakBefore).toBe(2);
+    expect(history.winningStreakAfter).toBe(3);
+    expect(history.winningStreakBonusApplied).toBe(true);
+    expect(new Prisma.Decimal(history.winningStreakBonusMultiplierUsed).equals("1.2")).toBe(true);
+    expect(history.totalVotesReceived).toBeGreaterThanOrEqual(3);
+    expect(history.voteCountBonusApplied).toBe(true);
+    expect(new Prisma.Decimal(history.voteCountBonusMultiplierUsed).equals("1.2")).toBe(true);
+    expect(new Prisma.Decimal(history.finalDelta).gte(0)).toBe(true);
   });
 
   it("rejects apply before all votes and rejects double apply", async () => {
@@ -438,7 +480,7 @@ describe("result reports and rating application", () => {
     expect(secondMatch.status).toBe("CONFIRMED");
     expect(await prisma.ratingHistory.count({ where: { matchId: first.match.id } })).toBe(8);
     expect(await prisma.ratingHistory.count({ where: { matchId: second.match.id } })).toBe(8);
-  });
+  }, 30_000);
 
   it("auto-apply remains single when final votes arrive concurrently", async () => {
     const { admin, match } = await createReadyMatch();

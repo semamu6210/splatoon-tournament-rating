@@ -34,6 +34,8 @@ export function serializeRatingConfig(
     strongVotePoints: serializeRequiredDecimal(config.strongVotePoints),
     weakVotePoints: serializeRequiredDecimal(config.weakVotePoints),
     losingStreakPenalty: serializeRequiredDecimal(config.losingStreakPenalty),
+    winningStreakBonusMultiplier: serializeRequiredDecimal(config.winningStreakBonusMultiplier),
+    voteCountBonusMultiplier: serializeRequiredDecimal(config.voteCountBonusMultiplier),
     createdAt: config.createdAt.toISOString(),
     updatedAt: config.updatedAt.toISOString(),
     xpMultiplierTiers: config.xpMultiplierTiers?.map(serializeXpTier),
