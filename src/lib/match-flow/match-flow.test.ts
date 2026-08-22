@@ -34,6 +34,10 @@ async function createUser(role: UserRole) {
   return user;
 }
 
+async function makeResultReportingAvailable(matchId: string) {
+  await prisma.match.update({ where: { id: matchId }, data: { startedAt: new Date(Date.now() - 61_000) } });
+}
+
 function multipliers(stepSize: 50 | 100, fallback = "1.0") {
   return buildDefaultMultiplierPayload(stepSize, fallback).map((tier) => {
     if (tier.minXp === null) return { ...tier, multiplier: "1.5" };
@@ -97,6 +101,7 @@ async function createReadyMatch(options?: {
     include: { players: true },
   });
   await startMatch(match.id);
+  await makeResultReportingAvailable(match.id);
   await openResultReporting(match.id);
   return { admin, tournament, players, match };
 }
@@ -201,16 +206,36 @@ describe("result reports and rating application", () => {
   it("allows only room host or admin to end a playing match", async () => {
     const { admin, match } = await createReadyMatch();
     const reloaded = await prisma.match.update({ where: { id: match.id }, data: { status: "PLAYING" } });
+    await prisma.match.update({ where: { id: match.id }, data: { startedAt: new Date() } });
     const hostId = reloaded.roomHostUserId!;
     const nonHost = match.players.find((player) => player.userId !== hostId)!;
 
     await expect(openResultReporting(match.id, nonHost.userId, UserRole.PLAYER)).rejects.toThrow("Only the room host or admin can end the match.");
+    await expect(openResultReporting(match.id, hostId, UserRole.PLAYER)).rejects.toThrow("試合開始から1分経過するまで結果報告できません。");
+    await makeResultReportingAvailable(match.id);
     await openResultReporting(match.id, hostId, UserRole.PLAYER);
     expect((await prisma.match.findUniqueOrThrow({ where: { id: match.id } })).status).toBe("RESULT_REPORTING");
 
     await prisma.match.update({ where: { id: match.id }, data: { status: "PLAYING" } });
     await openResultReporting(match.id, admin.id, admin.role);
     expect((await prisma.match.findUniqueOrThrow({ where: { id: match.id } })).status).toBe("RESULT_REPORTING");
+  });
+
+  it("sets startedAt once and allows room host result reporting after 60 seconds", async () => {
+    const { match } = await createReadyMatch();
+    await prisma.match.update({ where: { id: match.id }, data: { status: "CREATED", startedAt: null } });
+
+    const started = await startMatch(match.id);
+    expect(started.startedAt).toBeInstanceOf(Date);
+    await expect(startMatch(match.id)).rejects.toThrow("Only CREATED matches can start.");
+
+    await expect(openResultReporting(match.id, started.roomHostUserId!, UserRole.PLAYER)).rejects.toThrow(
+      "試合開始から1分経過するまで結果報告できません。",
+    );
+    await makeResultReportingAvailable(match.id);
+    const reporting = await openResultReporting(match.id, started.roomHostUserId!, UserRole.PLAYER);
+    expect(reporting.status).toBe("RESULT_REPORTING");
+    expect(reporting.startedAt?.getTime()).toBeLessThan(Date.now());
   });
 
   it("allows only room host or admin to confirm the normal result", async () => {

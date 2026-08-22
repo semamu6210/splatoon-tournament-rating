@@ -8,6 +8,7 @@ import { AutoRatingApplyTrigger } from "@/components/auto-rating-apply-trigger";
 import { ApiButton } from "@/components/api-button";
 import { AuthControls } from "@/components/auth-controls";
 import { MatchStatusRefresh } from "@/components/match-status-refresh";
+import { MatchPlayingActions } from "@/components/match-playing-actions";
 import { PlayerAvatar } from "@/components/player-avatar";
 import { PlayerVoteForm } from "@/components/player-vote-form";
 import { ResultReportForm } from "@/components/result-report-form";
@@ -205,7 +206,7 @@ export default async function MatchPage({ params }: PageProps) {
               {match.tournament.name} / {tournamentPhaseTypeLabel[match.phase.phaseType]} / {matchStatusLabel[match.status]}
             </p>
             <p className="mt-1 text-sm text-zinc-600">
-              試合番号: #{match.matchNumber ?? "-"} / ルール: {matchRuleLabel[match.rule]}
+              試合番号: #{match.matchNumber ?? "-"} / 第{match.roundNumber ?? "-"}試合 / ルール: {matchRuleLabel[match.rule]}
             </p>
           </div>
           <AuthControls />
@@ -308,13 +309,7 @@ export default async function MatchPage({ params }: PageProps) {
         {match.status === "PLAYING" && (
           <section className="grid gap-3 rounded-md border border-zinc-300 bg-white p-4">
             <h2 className="text-lg font-semibold">試合中</h2>
-            <p className="text-sm text-zinc-600">Splatoonでの試合が終わったら、部屋主が試合終了を押してください。</p>
-            {isRoomHost && (
-              <ApiButton url={`/api/matches/${match.id}/open-result-reporting`}>
-                試合終了
-              </ApiButton>
-            )}
-            {!isRoomHost && <p className="text-sm text-zinc-600">部屋主の{hostLabel}さんが試合終了操作を行います。</p>}
+            <MatchPlayingActions hostLabel={hostLabel} isRoomHost={isRoomHost} matchId={match.id} startedAt={match.startedAt?.toISOString() ?? null} />
           </section>
         )}
 

@@ -59,6 +59,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
         orderBy: { joinedAt: "asc" },
       },
       phases: {
+        include: { rounds: { orderBy: { roundNumber: "desc" }, take: 1 } },
         orderBy: { sortOrder: "asc" },
       },
     },
@@ -106,6 +107,18 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           orderBy: { joinedAt: "desc" },
         })
       : null;
+  const activeMatch =
+    session?.user?.id && activePhase
+      ? await prisma.match.findFirst({
+          where: {
+            phaseId: activePhase.id,
+            players: { some: { userId: session.user.id } },
+            status: { in: ["CREATED", "PLAYING", "RESULT_REPORTING", "VOTE_REPORTING"] },
+          },
+          orderBy: { createdAt: "desc" },
+          select: { id: true },
+        })
+      : null;
   const queueStatus =
     queueEntry?.status === "WAITING"
       ? {
@@ -115,6 +128,8 @@ export default async function TournamentDetailPage({ params }: PageProps) {
         }
       : queueEntry?.status === "MATCHED" && queueEntry.matchId
         ? { status: "MATCHED" as const, matchId: queueEntry.matchId }
+        : activeMatch
+          ? { status: "MATCHED" as const, matchId: activeMatch.id }
         : { status: "NOT_QUEUED" as const };
   const myVoteStats =
     session?.user && myParticipant
@@ -151,6 +166,10 @@ export default async function TournamentDetailPage({ params }: PageProps) {
       };
     }),
   );
+  const activeRound = activePhase?.rounds[0] ?? null;
+  const myActivePhaseCount = myRanking?.currentPhase?.confirmedMatchesInPhase ?? 0;
+  const waitingForOtherBlocks =
+    Boolean(activePhase && activeRound && !activeMatch && myRanking?.currentPhase && myActivePhaseCount < activePhase.requiredMatchesPerPlayer);
 
   return (
     <main className="min-h-screen px-5 py-8">
@@ -183,6 +202,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
               <li className="border-b border-zinc-100 pb-2" key={phase.id}>
                 {tournamentPhaseTypeLabel[phase.phaseType]} / {tournamentPhaseStatusLabel[phase.status]} / 必要試合数 {phase.requiredMatchesPerPlayer}
                 {phase.advancePlayerCount ? ` / 進出 ${phase.advancePlayerCount}位まで` : ""}
+                {phase.rounds[0] ? ` / 第${phase.rounds[0].roundNumber}試合` : ""}
               </li>
             ))}
             {tournament.phases.length === 0 && <li className="text-zinc-600">フェーズ未作成</li>}
@@ -220,9 +240,17 @@ export default async function TournamentDetailPage({ params }: PageProps) {
               <p>現在レート: {myParticipant.rating ? formatRating(myParticipant.rating) : "大会開始前"}</p>
               {myRanking?.currentPhase && (
                 <p>
-                  現在フェーズ試合数: {myRanking.currentPhase.confirmedMatchesInPhase}/
-                  {myRanking.currentPhase.requiredMatchesPerPlayer} / 残り {myRanking.currentPhase.remainingMatchesInPhase}
+                  {tournamentPhaseTypeLabel[activePhase?.phaseType ?? "QUALIFIER"]} 第
+                  {Math.min(myRanking.currentPhase.confirmedMatchesInPhase + 1, myRanking.currentPhase.requiredMatchesPerPlayer)}試合 / 全
+                  {myRanking.currentPhase.requiredMatchesPerPlayer}試合 / 残り {myRanking.currentPhase.remainingMatchesInPhase}
                 </p>
+              )}
+              {waitingForOtherBlocks && (
+                <div className="grid gap-1 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                  <p>第{activeRound?.roundNumber}試合が終了しました</p>
+                  <p>他ブロックの試合終了を待っています</p>
+                  <p>全ブロック終了後、自動で次のマッチングを開始します</p>
+                </div>
               )}
               {myRanking && <p>全体順位: {myRanking.rank}位</p>}
               {myBlock && (

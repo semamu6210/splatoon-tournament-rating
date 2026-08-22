@@ -1,4 +1,4 @@
-import { Prisma, QueueStatus, TournamentPhaseStatus, TournamentStatus } from "@prisma/client";
+import { Prisma, QueueStatus, TournamentPhaseStatus, TournamentStatus, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
 import { randomInt } from "node:crypto";
 
 import { ApiError } from "@/lib/http";
@@ -290,6 +290,15 @@ async function getWaitingPlayers(tx: Tx, phaseId: string, requiredMatchesPerPlay
   return players;
 }
 
+async function getConfirmedCountsByUserId(tx: Tx, phaseId: string, userIds: string[]) {
+  const confirmedCounts = await tx.matchPlayer.groupBy({
+    by: ["userId"],
+    where: { userId: { in: userIds }, match: { phaseId, status: "CONFIRMED" } },
+    _count: { userId: true },
+  });
+  return new Map(confirmedCounts.map((count) => [count.userId, count._count.userId]));
+}
+
 async function nextMatchNumber(tx: Tx, phaseId: string) {
   const latest = await tx.match.findFirst({
     where: { phaseId, matchNumber: { not: null } },
@@ -359,6 +368,191 @@ function validateEightPlayers(players: MatchmakingPlayer[]) {
   }
 }
 
+async function createMatchForSelectedPlayers(params: {
+  tx: Tx;
+  phase: {
+    id: string;
+    tournamentId: string;
+    rule: "AREA" | "YAGURA" | "HOKO" | "ASARI";
+    defaultStageId: string | null;
+    stageSelectionMode: "ADMIN" | "RANDOM";
+  };
+  activeConfig: TournamentRatingConfig & { xpMultiplierTiers: TournamentXpMultiplierTier[] };
+  selected: MatchmakingPlayer[];
+  roundNumber?: number;
+  queueEntryIds?: string[];
+}) {
+  validateEightPlayers(params.selected);
+  const teams = splitIntoBalancedTeams(params.selected);
+
+  if (teams.teamA.length !== 4 || teams.teamB.length !== 4) {
+    throw new ApiError(500, "Team assignment must be 4v4.");
+  }
+
+  const selectedStage = await selectStageForMatch(params.tx, params.phase);
+  const allPlayers = [...teams.teamA, ...teams.teamB];
+  const privateRoomCode = await generateAvailablePrivateRoomCode(params.tx);
+  const roomHostUserId = await selectRoomHostUserId(params.tx, allPlayers);
+  const match = await params.tx.match.create({
+    data: {
+      tournamentId: params.phase.tournamentId,
+      phaseId: params.phase.id,
+      ratingConfigId: params.activeConfig.id,
+      ratingConfigVersion: params.activeConfig.version,
+      matchNumber: await nextMatchNumber(params.tx, params.phase.id),
+      roundNumber: params.roundNumber,
+      rule: params.phase.rule,
+      stageId: selectedStage?.id,
+      stageName: selectedStage?.name,
+      privateRoomCode,
+      roomHostUserId,
+      status: "CREATED",
+    },
+  });
+
+  await params.tx.matchPlayer.createMany({
+    data: [
+      ...teams.teamA.map((player) => ({
+        matchId: match.id,
+        userId: player.userId,
+        team: "A" as const,
+        ratingBefore: player.rating,
+        matchingRatingAtMatch: player.matchingPower,
+        areaXpAtMatch: player.areaXp,
+        losingStreakAtMatch: player.losingStreak,
+        ratingAfter: null,
+      })),
+      ...teams.teamB.map((player) => ({
+        matchId: match.id,
+        userId: player.userId,
+        team: "B" as const,
+        ratingBefore: player.rating,
+        matchingRatingAtMatch: player.matchingPower,
+        areaXpAtMatch: player.areaXp,
+        losingStreakAtMatch: player.losingStreak,
+        ratingAfter: null,
+      })),
+    ],
+  });
+
+  if (params.queueEntryIds && params.queueEntryIds.length > 0) {
+    await params.tx.queueEntry.updateMany({
+      where: { id: { in: params.queueEntryIds }, status: QueueStatus.MATCHED },
+      data: { matchId: match.id },
+    });
+  }
+
+  return {
+    match,
+    teamA: teams.teamA.map((player) => player.userId),
+    teamB: teams.teamB.map((player) => player.userId),
+  };
+}
+
+async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType<Tx["tournamentPhase"]["findUnique"]>> & { tournament: { status: TournamentStatus } }) {
+  if (!phase) throw new ApiError(404, "Phase not found.");
+  const blocks = await tx.tournamentBlock.findMany({
+    where: { phaseId: phase.id },
+    include: { participants: { include: { tournamentParticipant: true } } },
+    orderBy: { sortOrder: "asc" },
+  });
+  if (blocks.length === 0) return null;
+
+  const existingOpenRound = await tx.tournamentPhaseRound.findFirst({
+    where: { phaseId: phase.id, status: { in: ["PENDING", "MATCHING", "ACTIVE"] } },
+    orderBy: { roundNumber: "asc" },
+  });
+  const roundNumber = existingOpenRound?.roundNumber ?? 1;
+  const round = existingOpenRound ?? await tx.tournamentPhaseRound.create({
+    data: { phaseId: phase.id, roundNumber, status: "PENDING" },
+  });
+
+  const claimed = await tx.tournamentPhaseRound.updateMany({
+    where: { id: round.id, status: { in: ["PENDING", "COMPLETED"] } },
+    data: { status: "MATCHING", startedAt: new Date() },
+  });
+  if (claimed.count !== 1) {
+    return { matched: false as const, reason: "ROUND_ALREADY_MATCHING" as const, roundNumber };
+  }
+
+  const activeConfig = await tx.tournamentRatingConfig.findFirst({
+    where: { tournamentId: phase.tournamentId, isActive: true },
+    include: { xpMultiplierTiers: true },
+  });
+  if (!activeConfig) throw new ApiError(400, "Active rating config not found.");
+  validateCompleteRatingConfig(activeConfig);
+
+  const createdMatchIds: string[] = [];
+  for (const block of blocks) {
+    await tx.tournamentPhaseRoundBlock.upsert({
+      where: { phaseId_blockId_roundNumber: { phaseId: phase.id, blockId: block.id, roundNumber } },
+      update: { roundId: round.id, status: "MATCHING" },
+      create: { phaseId: phase.id, blockId: block.id, roundId: round.id, roundNumber, status: "MATCHING" },
+    });
+
+    const participants = block.participants.map((item) => item.tournamentParticipant).filter((participant) => participant.isActive && participant.rating);
+    const userIds = participants.map((participant) => participant.userId);
+    const completedByUserId = await getConfirmedCountsByUserId(tx, phase.id, userIds);
+    const openPlayers = await tx.matchPlayer.findMany({
+      where: {
+        userId: { in: userIds },
+        match: { status: { in: [...ACTIVE_MATCH_STATUSES] } },
+      },
+      select: { userId: true },
+    });
+    const openUserIds = new Set(openPlayers.map((player) => player.userId));
+    const candidates = participants
+      .filter((participant) => (completedByUserId.get(participant.userId) ?? 0) < phase.requiredMatchesPerPlayer)
+      .filter((participant) => !openUserIds.has(participant.userId))
+      .sort((left, right) => {
+        const leftCount = completedByUserId.get(left.userId) ?? 0;
+        const rightCount = completedByUserId.get(right.userId) ?? 0;
+        if (leftCount !== rightCount) return leftCount - rightCount;
+        return new Prisma.Decimal(left.rating ?? 0).comparedTo(right.rating ?? 0);
+      });
+
+    let madeBlockMatch = false;
+    for (let index = 0; index + 8 <= candidates.length; index += 8) {
+      const selected = candidates.slice(index, index + 8).map((participant): MatchmakingPlayer => ({
+        queueEntryId: `round-${round.id}-${participant.userId}`,
+        userId: participant.userId,
+        joinedAt: new Date(),
+        rating: participant.rating!,
+        losingStreak: participant.losingStreak,
+        areaXp: participant.areaXp,
+        isDummy: participant.isDummy,
+        completedMatchesInPhase: completedByUserId.get(participant.userId) ?? 0,
+        recentOpponentIds: new Set(),
+        recentTeammateIds: new Set(),
+        matchingPower: new Prisma.Decimal(participant.areaXp - participant.losingStreak * 50),
+      }));
+      const created = await createMatchForSelectedPlayers({ tx, phase, activeConfig, selected, roundNumber });
+      createdMatchIds.push(created.match.id);
+      madeBlockMatch = true;
+    }
+
+    await tx.tournamentPhaseRoundBlock.update({
+      where: { phaseId_blockId_roundNumber: { phaseId: phase.id, blockId: block.id, roundNumber } },
+      data: { status: madeBlockMatch ? "ACTIVE" : "COMPLETED" },
+    });
+  }
+
+  await tx.tournamentPhaseRound.update({
+    where: { id: round.id },
+    data: { status: createdMatchIds.length > 0 ? "ACTIVE" : "COMPLETED", completedAt: createdMatchIds.length > 0 ? null : new Date() },
+  });
+
+  return {
+    matched: createdMatchIds.length > 0,
+    reason: createdMatchIds.length > 0 ? undefined : "NO_ELIGIBLE_PLAYERS",
+    roundNumber,
+    matchIds: createdMatchIds,
+    matchId: createdMatchIds[0],
+  } as
+    | { matched: true; roundNumber: number; matchIds: string[]; matchId: string; reason?: undefined }
+    | { matched: false; roundNumber: number; matchIds: string[]; matchId?: undefined; reason: "NO_ELIGIBLE_PLAYERS" };
+}
+
 export async function runMatchmaking(phaseId: string) {
   return prisma.$transaction(
     async (tx) => {
@@ -375,6 +569,9 @@ export async function runMatchmaking(phaseId: string) {
         throw new ApiError(400, "Tournament and phase must be ACTIVE.");
       }
       await ensureTestDummiesWaitingForPhaseTx(tx, phaseId);
+
+      const synchronized = await runSynchronizedRoundMatchmaking(tx, phase);
+      if (synchronized) return synchronized;
 
       const activeConfig = await tx.tournamentRatingConfig.findFirst({
         where: { tournamentId: phase.tournamentId, isActive: true },
@@ -402,8 +599,6 @@ export async function runMatchmaking(phaseId: string) {
         return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
       }
 
-      validateEightPlayers(selected);
-
       const queueEntryIds = selected.map((player) => player.queueEntryId);
 
       const claimed = await tx.queueEntry.updateMany({
@@ -421,69 +616,118 @@ export async function runMatchmaking(phaseId: string) {
         throw new ApiError(409, "Selected queue entries were changed by another matchmaking run.");
       }
 
-      const teams = splitIntoBalancedTeams(selected);
-
-      if (teams.teamA.length !== 4 || teams.teamB.length !== 4) {
-        throw new ApiError(500, "Team assignment must be 4v4.");
-      }
-
-      const selectedStage = await selectStageForMatch(tx, phase);
-      const allPlayers = [...teams.teamA, ...teams.teamB];
-      const privateRoomCode = await generateAvailablePrivateRoomCode(tx);
-      const roomHostUserId = await selectRoomHostUserId(tx, allPlayers);
-      const match = await tx.match.create({
-        data: {
-          tournamentId: phase.tournamentId,
-          phaseId,
-          ratingConfigId: activeConfig.id,
-          ratingConfigVersion: activeConfig.version,
-          matchNumber: await nextMatchNumber(tx, phaseId),
-          rule: phase.rule,
-          stageId: selectedStage?.id,
-          stageName: selectedStage?.name,
-          privateRoomCode,
-          roomHostUserId,
-          status: "CREATED",
-        },
-      });
-
-      await tx.matchPlayer.createMany({
-        data: [
-          ...teams.teamA.map((player) => ({
-            matchId: match.id,
-            userId: player.userId,
-            team: "A" as const,
-            ratingBefore: player.rating,
-            matchingRatingAtMatch: player.matchingPower,
-            areaXpAtMatch: player.areaXp,
-            losingStreakAtMatch: player.losingStreak,
-            ratingAfter: null,
-          })),
-          ...teams.teamB.map((player) => ({
-            matchId: match.id,
-            userId: player.userId,
-            team: "B" as const,
-            ratingBefore: player.rating,
-            matchingRatingAtMatch: player.matchingPower,
-            areaXpAtMatch: player.areaXp,
-            losingStreakAtMatch: player.losingStreak,
-            ratingAfter: null,
-          })),
-        ],
-      });
-
-      await tx.queueEntry.updateMany({
-        where: { id: { in: queueEntryIds }, status: QueueStatus.MATCHED },
-        data: { matchId: match.id },
-      });
+      const created = await createMatchForSelectedPlayers({ tx, phase, activeConfig, selected, queueEntryIds });
 
       return {
         matched: true as const,
-        matchId: match.id,
-        teamA: teams.teamA.map((player) => player.userId),
-        teamB: teams.teamB.map((player) => player.userId),
+        matchId: created.match.id,
+        teamA: created.teamA,
+        teamB: created.teamB,
       };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
   );
+}
+
+async function allPhaseTargetsReachedRequiredMatches(tx: Tx, phase: { id: string; tournamentId: string; requiredMatchesPerPlayer: number }) {
+  const targets = await tx.tournamentPhaseParticipant.findMany({
+    where: { phaseId: phase.id, isEligible: true },
+    include: { tournamentParticipant: true },
+  });
+  const participants =
+    targets.length > 0
+      ? targets.map((target) => target.tournamentParticipant)
+      : await tx.tournamentParticipant.findMany({
+          where: { tournamentId: phase.tournamentId, isActive: true, rating: { not: null } },
+        });
+  const userIds = participants.map((participant) => participant.userId);
+  if (userIds.length === 0) return true;
+  const completedByUserId = await getConfirmedCountsByUserId(tx, phase.id, userIds);
+  return userIds.every((userId) => (completedByUserId.get(userId) ?? 0) >= phase.requiredMatchesPerPlayer);
+}
+
+export async function checkAndAdvanceRound(phaseId: string, roundNumber: number | null) {
+  if (!roundNumber) return { advanced: false as const, reason: "NO_ROUND" as const };
+
+  const result = await prisma.$transaction(
+    async (tx) => {
+      const phase = await tx.tournamentPhase.findUnique({ where: { id: phaseId }, include: { tournament: true } });
+      if (!phase || phase.status !== TournamentPhaseStatus.ACTIVE || phase.tournament.status !== TournamentStatus.ACTIVE) {
+        return { shouldStartNext: false as const, completed: false as const, reason: "PHASE_NOT_ACTIVE" as const };
+      }
+
+      const round = await tx.tournamentPhaseRound.findUnique({
+        where: { phaseId_roundNumber: { phaseId, roundNumber } },
+      });
+      if (!round || round.status !== "ACTIVE") {
+        return { shouldStartNext: false as const, completed: false as const, reason: "ROUND_NOT_ACTIVE" as const };
+      }
+
+      const blocks = await tx.tournamentBlock.findMany({
+        where: { phaseId },
+        include: { participants: { include: { tournamentParticipant: true } } },
+        orderBy: { sortOrder: "asc" },
+      });
+      if (blocks.length === 0) {
+        return { shouldStartNext: false as const, completed: false as const, reason: "NO_BLOCKS" as const };
+      }
+
+      let completedBlocks = 0;
+      for (const block of blocks) {
+        const blockUserIds = block.participants.map((item) => item.tournamentParticipant.userId);
+        const openMatches = await tx.match.count({
+          where: {
+            phaseId,
+            roundNumber,
+            status: { in: [...ACTIVE_MATCH_STATUSES] },
+            players: { some: { userId: { in: blockUserIds } } },
+          },
+        });
+        const blockStatus = openMatches === 0 ? "COMPLETED" : "ACTIVE";
+        await tx.tournamentPhaseRoundBlock.upsert({
+          where: { phaseId_blockId_roundNumber: { phaseId, blockId: block.id, roundNumber } },
+          update: { status: blockStatus },
+          create: { phaseId, blockId: block.id, roundId: round.id, roundNumber, status: blockStatus },
+        });
+        if (blockStatus === "COMPLETED") completedBlocks += 1;
+      }
+
+      if (completedBlocks !== blocks.length) {
+        return { shouldStartNext: false as const, completed: false as const, completedBlocks, blockCount: blocks.length };
+      }
+
+      const claimed = await tx.tournamentPhaseRound.updateMany({
+        where: { id: round.id, status: "ACTIVE" },
+        data: { status: "COMPLETED", completedAt: new Date() },
+      });
+      if (claimed.count !== 1) {
+        return { shouldStartNext: false as const, completed: false as const, reason: "ROUND_ALREADY_COMPLETED" as const };
+      }
+
+      const allDone = await allPhaseTargetsReachedRequiredMatches(tx, phase);
+      if (allDone || roundNumber >= phase.requiredMatchesPerPlayer) {
+        return { shouldStartNext: false as const, completed: true as const, reason: "FINAL_ROUND_COMPLETED" as const };
+      }
+
+      await tx.tournamentPhaseRound.create({
+        data: { phaseId, roundNumber: roundNumber + 1, status: "PENDING" },
+      });
+      return { shouldStartNext: true as const, completed: true as const, nextRoundNumber: roundNumber + 1 };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+
+  if (result.shouldStartNext) {
+    const matchmaking = await runMatchmaking(phaseId).catch((error) => {
+      console.error("AUTO_ROUND_MATCHMAKING_FAILED", {
+        phaseId,
+        roundNumber: result.nextRoundNumber,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+    return { advanced: true as const, roundNumber: result.nextRoundNumber, matchmaking };
+  }
+
+  return { advanced: false as const, ...result };
 }

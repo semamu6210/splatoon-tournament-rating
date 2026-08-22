@@ -138,6 +138,7 @@ model TournamentPhase {
   defaultStage             TournamentStage?             @relation("PhaseDefaultStage", fields: [defaultStageId], references: [id])
   tournament               Tournament                   @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   participants             TournamentPhaseParticipant[]
+  rounds                   TournamentPhaseRound[]
 
   @@unique([tournamentId, phaseType])
   @@unique([tournamentId, sortOrder])
@@ -190,6 +191,7 @@ model TournamentBlock {
   advancePlayerCount Int?
   phase              TournamentPhase              @relation(fields: [phaseId], references: [id], onDelete: Cascade)
   participants       TournamentBlockParticipant[]
+  roundStates        TournamentPhaseRoundBlock[]
 
   @@unique([phaseId, name])
   @@unique([phaseId, sortOrder])
@@ -324,6 +326,8 @@ model Match {
   confirmedAt         DateTime?
   cancelledAt         DateTime?
   votingClosedAt      DateTime?
+  startedAt           DateTime?
+  roundNumber         Int?
   matchNumber         Int?
   rule                MatchRule              @default(AREA)
   stageId             String?
@@ -340,13 +344,49 @@ model Match {
   playerVotes         PlayerVote[]
   queueEntries        QueueEntry[]
   ratingHistories     RatingHistory[]
+  round               TournamentPhaseRound? @relation(fields: [phaseId, roundNumber], references: [phaseId, roundNumber])
 
   @@unique([phaseId, matchNumber])
+  @@index([phaseId, roundNumber, status])
   @@index([tournamentId, phaseId, status, createdAt])
   @@index([ratingConfigId])
   @@index([stageId])
   @@index([roomHostUserId])
   @@index([privateRoomCode])
+}
+
+model TournamentPhaseRound {
+  id          String                     @id @default(cuid())
+  phaseId     String
+  roundNumber Int
+  status      TournamentPhaseRoundStatus @default(PENDING)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  phase       TournamentPhase            @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  matches     Match[]
+  blocks      TournamentPhaseRoundBlock[]
+
+  @@unique([phaseId, roundNumber])
+  @@index([phaseId, status])
+}
+
+model TournamentPhaseRoundBlock {
+  id          String                     @id @default(cuid())
+  phaseId     String
+  roundId     String
+  blockId     String
+  roundNumber Int
+  status      TournamentPhaseRoundStatus @default(PENDING)
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  round       TournamentPhaseRound       @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  block       TournamentBlock            @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  @@unique([phaseId, blockId, roundNumber])
+  @@index([roundId, status])
+  @@index([blockId])
 }
 
 model MatchPlayer {
@@ -487,6 +527,13 @@ enum MatchStatus {
   VOTE_REPORTING
   CONFIRMED
   CANCELLED
+}
+
+enum TournamentPhaseRoundStatus {
+  PENDING
+  MATCHING
+  ACTIVE
+  COMPLETED
 }
 
 enum Team {

@@ -152,8 +152,9 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                   players: true,
                 },
               },
-              blocks: { include: { participants: true }, orderBy: { sortOrder: "asc" } },
+              blocks: { include: { participants: true, roundStates: { orderBy: { roundNumber: "desc" }, take: 1 } }, orderBy: { sortOrder: "asc" } },
               participants: true,
+              rounds: { include: { blocks: { include: { block: true }, orderBy: { block: { sortOrder: "asc" } } } }, orderBy: { roundNumber: "desc" }, take: 1 },
             },
             orderBy: { sortOrder: "asc" },
           },
@@ -340,6 +341,29 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                     {readinessByPhaseId.get(phase.id)?.waitingQueueEntries ?? 0}
                   </p>
                 )}
+                {phase.rounds[0] && (
+                  <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm">
+                    <p className="font-semibold">
+                      第{phase.rounds[0].roundNumber}試合{" "}
+                      {phase.rounds[0].blocks.filter((block) => block.status === "COMPLETED").length}/
+                      {phase.rounds[0].blocks.length}ブロック完了
+                    </p>
+                    <ul className="mt-2 grid gap-1">
+                      {phase.rounds[0].blocks.map((blockState) => (
+                        <li key={blockState.id}>
+                          {blockState.block.name} 第{blockState.roundNumber}試合{" "}
+                          {blockState.status === "COMPLETED"
+                            ? "完了"
+                            : blockState.status === "ACTIVE"
+                              ? "進行中"
+                              : blockState.status === "MATCHING"
+                                ? "マッチング中"
+                                : "待機中"}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {advancementByPhaseId.get(phase.id)?.status === "NEEDS_ADMIN_DECISION" && (
                   <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
                     <p className="font-semibold">同率境界警告: NEEDS_ADMIN_DECISION</p>
@@ -387,7 +411,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                 <ul className="mt-2 grid gap-1 text-sm text-zinc-700">
                   {phase.matches.map((match) => (
                     <li key={match.id}>
-                      <Link className="underline" href={`/matches/${match.id}`}>{match.id}</Link> / {matchStatusLabel[match.status]} / 使用ステージ {match.stageName ?? "未設定"} / {match.players.length}人
+                      <Link className="underline" href={`/matches/${match.id}`}>{match.id}</Link> / 第{match.roundNumber ?? "-"}試合 / {matchStatusLabel[match.status]} / 使用ステージ {match.stageName ?? "未設定"} / {match.players.length}人
                     </li>
                   ))}
                 </ul>

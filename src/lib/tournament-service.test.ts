@@ -268,10 +268,14 @@ describe("tournament service", () => {
     const phase = await prisma.tournamentPhase.create({
       data: { tournamentId: tournament.id, phaseType: "QUALIFIER", status: "ACTIVE", requiredMatchesPerPlayer: 10, sortOrder: 1 },
     });
-    const participant = await prisma.tournamentParticipant.findFirstOrThrow({ where: { tournamentId: tournament.id } });
-    await prisma.tournamentPhaseParticipant.create({ data: { phaseId: phase.id, tournamentParticipantId: participant.id } });
+    const participants = await prisma.tournamentParticipant.findMany({ where: { tournamentId: tournament.id } });
+    await prisma.tournamentPhaseParticipant.createMany({
+      data: participants.map((participant) => ({ phaseId: phase.id, tournamentParticipantId: participant.id })),
+    });
     const block = await prisma.tournamentBlock.create({ data: { phaseId: phase.id, name: "ブロックA", sortOrder: 1 } });
-    await prisma.tournamentBlockParticipant.create({ data: { blockId: block.id, phaseId: phase.id, tournamentParticipantId: participant.id } });
+    await prisma.tournamentBlockParticipant.createMany({
+      data: participants.map((participant) => ({ blockId: block.id, phaseId: phase.id, tournamentParticipantId: participant.id })),
+    });
 
     for (const player of players) {
       await joinQueue(player.id, phase.id);

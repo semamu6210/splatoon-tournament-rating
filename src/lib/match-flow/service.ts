@@ -2,6 +2,7 @@ import { MatchStatus, Prisma, type Team, type UserRole, type VoteType } from "@p
 
 import { ApiError } from "@/lib/http";
 import { calculatePlayerRatingResults } from "@/lib/match-flow/rating";
+import { checkAndAdvanceRound } from "@/lib/matchmaking/service";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { ensureTestDummiesWaitingForPhase } from "@/lib/test-dummy-queue";
@@ -20,6 +21,14 @@ const RATING_TRANSACTION_OPTIONS = {
   maxWait: 10_000,
   timeout: 30_000,
 } as const;
+const RESULT_REPORT_DELAY_MS = 60_000;
+
+function assertResultReportDelayElapsed(match: { startedAt: Date | null }, role?: UserRole) {
+  if (role && canManage(role)) return;
+  if (!match.startedAt || Date.now() - match.startedAt.getTime() < RESULT_REPORT_DELAY_MS) {
+    throw new ApiError(400, "試合開始から1分経過するまで結果報告できません。");
+  }
+}
 
 function assertTeam(value: unknown): Team {
   if (value !== "A" && value !== "B") {
@@ -69,7 +78,7 @@ export async function startMatch(matchId: string) {
         throw new ApiError(400, "この大会で使用できないステージです。");
       }
     }
-    return tx.match.update({ where: { id: matchId }, data: { status: "PLAYING" } });
+    return tx.match.update({ where: { id: matchId }, data: { status: "PLAYING", startedAt: match.startedAt ?? new Date() } });
   });
 }
 
@@ -82,6 +91,7 @@ export async function openResultReporting(matchId: string, userId?: string, role
     if (userId && !canOperateAsHostOrAdmin(match, userId, role)) {
       throw new ApiError(403, "Only the room host or admin can end the match.");
     }
+    assertResultReportDelayElapsed(match, role);
     return tx.match.update({ where: { id: matchId }, data: { status: "RESULT_REPORTING" } });
   });
 }
@@ -101,6 +111,7 @@ export async function submitResultReport(userId: string, matchId: string, report
     if (!canOperateAsHostOrAdmin(match, userId, role)) {
       throw new ApiError(403, "Only the room host or admin can confirm the result.");
     }
+    assertResultReportDelayElapsed(match, role);
     await tx.matchResultReport.upsert({
       where: { matchId_userId: { matchId, userId } },
       update: { reportedWinnerTeam: team },
@@ -429,6 +440,7 @@ export async function applyRating(matchId: string) {
   try {
     const match = await applyRatingOnce(matchId);
     await ensureTestDummiesWaitingForPhase(match.phaseId);
+    await checkAndAdvanceRound(match.phaseId, match.roundNumber);
     return match;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {

@@ -2,7 +2,7 @@ import { TournamentPhaseStatus, UserRole } from "@prisma/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openResultReporting, startMatch, submitPlayerVotes, submitResultReport } from "@/lib/match-flow/service";
-import { joinQueue, runMatchmaking } from "@/lib/matchmaking/service";
+import { checkAndAdvanceRound, joinQueue, runMatchmaking } from "@/lib/matchmaking/service";
 import { prisma } from "@/lib/prisma";
 import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
 import { addTestDummies, fullyAutomateTestMatch, queueTestDummies, submitTestDummyVotes } from "@/lib/test-dummy-service";
@@ -39,6 +39,26 @@ async function createConfiguredTournament(isTestTournament: boolean) {
     multipliers: buildDefaultMultiplierPayload(100),
   });
   return { admin, tournament };
+}
+
+async function makeResultReportingAvailable(matchId: string) {
+  await prisma.match.update({ where: { id: matchId }, data: { startedAt: new Date(Date.now() - 61_000) } });
+}
+
+async function createBlocksForUserGroups(phaseId: string, groups: Array<{ name: string; userIds: string[] }>) {
+  for (let index = 0; index < groups.length; index += 1) {
+    const block = await prisma.tournamentBlock.create({
+      data: { phaseId, name: groups[index].name, sortOrder: index + 1 },
+    });
+    const participants = await prisma.tournamentParticipant.findMany({ where: { userId: { in: groups[index].userIds } } });
+    await prisma.tournamentBlockParticipant.createMany({
+      data: participants.map((participant) => ({
+        phaseId,
+        blockId: block.id,
+        tournamentParticipantId: participant.id,
+      })),
+    });
+  }
 }
 
 afterEach(async () => {
@@ -113,6 +133,7 @@ describe("test dummies", () => {
     expect([realA.id, realB.id]).toContain(match.roomHostUserId);
 
     await startMatch(match.id);
+    await makeResultReportingAvailable(match.id);
     await openResultReporting(match.id, match.roomHostUserId!, UserRole.PLAYER);
     await submitResultReport(match.roomHostUserId!, match.id, "A", UserRole.PLAYER);
 
@@ -235,6 +256,7 @@ describe("test dummies", () => {
     });
 
     await startMatch(match.id);
+    await makeResultReportingAvailable(match.id);
     await openResultReporting(match.id, real.id, UserRole.PLAYER);
     await submitResultReport(real.id, match.id, "A", UserRole.PLAYER);
 
@@ -299,6 +321,49 @@ describe("test dummies", () => {
     expect(new Set(votes.map((vote) => vote.voterUserId))).toHaveLength(8);
     expect(await prisma.ratingHistory.count({ where: { matchId: matchmaking.matchId } })).toBe(8);
     expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING" } })).toBe(0);
+  });
+
+  it("runs synchronized rounds in a dummy tournament and waits for all four blocks", async () => {
+    const { admin, tournament } = await createConfiguredTournament(true);
+    await openRegistration(admin.id, tournament.id);
+    const realUsers = [];
+    for (let index = 0; index < 4; index += 1) {
+      const user = await createUser(UserRole.PLAYER);
+      realUsers.push(user);
+      await joinTournament(user.id, tournament.id, { areaXp: 2500 + index, participantName: `Real ${index}` });
+    }
+    const dummies = await addTestDummies(admin.id, admin.role, tournament.id, { count: 28, areaXp: 2500 });
+    createdUserIds.push(...dummies.map((dummy) => dummy.userId));
+    await startTournament(admin.id, tournament.id);
+
+    const phase = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.ACTIVE,
+        requiredMatchesPerPlayer: 2,
+        sortOrder: 1,
+      },
+    });
+    const userIds = [...realUsers.map((user) => user.id), ...dummies.map((dummy) => dummy.userId)];
+    await createBlocksForUserGroups(phase.id, [
+      { name: "A", userIds: userIds.slice(0, 8) },
+      { name: "B", userIds: userIds.slice(8, 16) },
+      { name: "C", userIds: userIds.slice(16, 24) },
+      { name: "D", userIds: userIds.slice(24, 32) },
+    ]);
+
+    await runMatchmaking(phase.id);
+    const roundOne = await prisma.match.findMany({ where: { phaseId: phase.id, roundNumber: 1 } });
+    expect(roundOne).toHaveLength(4);
+
+    await prisma.match.update({ where: { id: roundOne[0].id }, data: { status: "CONFIRMED" } });
+    await checkAndAdvanceRound(phase.id, 1);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(0);
+
+    await prisma.match.updateMany({ where: { id: { in: roundOne.slice(1).map((match) => match.id) } }, data: { status: "CONFIRMED" } });
+    await checkAndAdvanceRound(phase.id, 1);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(4);
   });
 
   it("rejects full automation for normal tournaments", async () => {

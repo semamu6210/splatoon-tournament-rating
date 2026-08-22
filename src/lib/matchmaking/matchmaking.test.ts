@@ -5,7 +5,7 @@ import { calculateMatchingPower } from "@/lib/matchmaking/rating";
 import { selectEightPlayers } from "@/lib/matchmaking/selection";
 import { splitIntoBalancedTeams } from "@/lib/matchmaking/team";
 import type { WaitingPlayer } from "@/lib/matchmaking/types";
-import { getQueueStatus, joinQueue, joinQueueAndRunMatchmaking, leaveQueue, runMatchmaking } from "@/lib/matchmaking/service";
+import { checkAndAdvanceRound, getQueueStatus, joinQueue, joinQueueAndRunMatchmaking, leaveQueue, runMatchmaking } from "@/lib/matchmaking/service";
 import { prisma } from "@/lib/prisma";
 import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
 import {
@@ -75,6 +75,24 @@ async function createActiveTournamentWithPhase(playerCount: number) {
   });
 
   return { admin, tournament, phase, players };
+}
+
+async function createBlocksForPlayers(phaseId: string, groups: Array<{ name: string; players: Array<{ id: string }> }>) {
+  for (let index = 0; index < groups.length; index += 1) {
+    const block = await prisma.tournamentBlock.create({
+      data: { phaseId, name: groups[index].name, sortOrder: index + 1 },
+    });
+    const participants = await prisma.tournamentParticipant.findMany({
+      where: { userId: { in: groups[index].players.map((player) => player.id) } },
+    });
+    await prisma.tournamentBlockParticipant.createMany({
+      data: participants.map((participant) => ({
+        phaseId,
+        blockId: block.id,
+        tournamentParticipantId: participant.id,
+      })),
+    });
+  }
 }
 
 function waitingPlayer(params: {
@@ -440,5 +458,81 @@ describe("queue and matchmaking service", () => {
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(matches).toHaveLength(1);
     expect(matches[0].players).toHaveLength(8);
+  });
+
+  it("does not create the next round until every block completes the current round", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(16);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 2 } });
+    await createBlocksForPlayers(phase.id, [
+      { name: "A", players: players.slice(0, 8) },
+      { name: "B", players: players.slice(8, 16) },
+    ]);
+
+    const firstRound = await runMatchmaking(phase.id);
+    expect(firstRound.matched).toBe(true);
+    const roundOneMatches = await prisma.match.findMany({ where: { phaseId: phase.id, roundNumber: 1 }, orderBy: { matchNumber: "asc" } });
+    expect(roundOneMatches).toHaveLength(2);
+
+    await prisma.match.update({ where: { id: roundOneMatches[0].id }, data: { status: "CONFIRMED" } });
+    await checkAndAdvanceRound(phase.id, 1);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(0);
+
+    await prisma.match.update({ where: { id: roundOneMatches[1].id }, data: { status: "CONFIRMED" } });
+    await checkAndAdvanceRound(phase.id, 1);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(2);
+  });
+
+  it("does not create duplicate next-round matches when round completion is checked concurrently", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(16);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 3 } });
+    await createBlocksForPlayers(phase.id, [
+      { name: "A", players: players.slice(0, 8) },
+      { name: "B", players: players.slice(8, 16) },
+    ]);
+
+    await runMatchmaking(phase.id);
+    await prisma.match.updateMany({ where: { phaseId: phase.id, roundNumber: 1 }, data: { status: "CONFIRMED" } });
+    await Promise.allSettled([checkAndAdvanceRound(phase.id, 1), checkAndAdvanceRound(phase.id, 1)]);
+
+    const roundTwoMatches = await prisma.match.findMany({ where: { phaseId: phase.id, roundNumber: 2 } });
+    expect(roundTwoMatches).toHaveLength(2);
+    expect(new Set(roundTwoMatches.map((match) => match.id))).toHaveLength(2);
+  });
+
+  it("does not create a next round after required matches are reached", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(16);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 1 } });
+    await createBlocksForPlayers(phase.id, [
+      { name: "A", players: players.slice(0, 8) },
+      { name: "B", players: players.slice(8, 16) },
+    ]);
+
+    await runMatchmaking(phase.id);
+    await prisma.match.updateMany({ where: { phaseId: phase.id, roundNumber: 1 }, data: { status: "CONFIRMED" } });
+    await checkAndAdvanceRound(phase.id, 1);
+
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(0);
+    expect((await prisma.tournamentPhaseRound.findUniqueOrThrow({ where: { phaseId_roundNumber: { phaseId: phase.id, roundNumber: 1 } } })).status).toBe("COMPLETED");
+  });
+
+  it("waits for every match in a block before completing the block round", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(24);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 2 } });
+    await createBlocksForPlayers(phase.id, [
+      { name: "A", players: players.slice(0, 16) },
+      { name: "B", players: players.slice(16, 24) },
+    ]);
+
+    await runMatchmaking(phase.id);
+    const roundOneMatches = await prisma.match.findMany({ where: { phaseId: phase.id, roundNumber: 1 }, include: { players: true } });
+    expect(roundOneMatches).toHaveLength(3);
+
+    await prisma.match.updateMany({ where: { id: { in: roundOneMatches.slice(0, 2).map((match) => match.id) } }, data: { status: "CONFIRMED" } });
+    await checkAndAdvanceRound(phase.id, 1);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(0);
+
+    await prisma.match.update({ where: { id: roundOneMatches[2].id }, data: { status: "CONFIRMED" } });
+    await checkAndAdvanceRound(phase.id, 1);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(3);
   });
 });
