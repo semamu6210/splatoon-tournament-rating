@@ -213,8 +213,10 @@ export async function submitPlayerVotes(userId: string, matchId: string, votes: 
     }
     const voter = match.players.find((player) => player.userId === userId);
     if (!voter) throw new ApiError(403, "Only match players can vote.");
-    const existing = await tx.playerVote.count({ where: { matchId, voterUserId: userId } });
-    if (existing > 0) throw new ApiError(409, "Votes have already been submitted.");
+    const existing = await tx.playerVote.findMany({ where: { matchId, voterUserId: userId } });
+    if (existing.length > 0) {
+      return existing;
+    }
 
     for (const vote of normalized) {
       const target = match.players.find((player) => player.userId === vote.targetUserId);
@@ -235,7 +237,15 @@ export async function submitPlayerVotes(userId: string, matchId: string, votes: 
     return tx.playerVote.findMany({ where: { matchId, voterUserId: userId } });
   });
 
-  await attemptAutoApplyRatingForMatch(matchId);
+  try {
+    await attemptAutoApplyRatingForMatch(matchId);
+  } catch (error) {
+    console.error("AUTO_RATING_AFTER_VOTE_FAILED", {
+      matchId,
+      errorCode: getAutoApplyErrorCode(error),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   return submittedVotes;
 }
 
