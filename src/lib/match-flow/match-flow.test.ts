@@ -258,6 +258,29 @@ describe("result reports and rating application", () => {
     expect(adminConfirmed.winnerTeam).toBe("B");
   });
 
+  it("allows admin force-result rescue from CREATED into vote reporting with a required reason", async () => {
+    const { admin, match } = await createReadyMatch();
+    await prisma.match.update({
+      where: { id: match.id },
+      data: { status: "CREATED", winnerTeam: null, startedAt: null },
+    });
+
+    await expect(forceResult(admin.id, match.id, "A", "")).rejects.toThrow("reason is required.");
+    const rescued = await forceResult(admin.id, match.id, "B", "実試合済みだが状態遷移できないため救済");
+
+    expect(rescued.status).toBe("VOTE_REPORTING");
+    expect(rescued.winnerTeam).toBe("B");
+
+    const log = await prisma.adminActionLog.findFirstOrThrow({
+      where: { action: "MATCH_RESULT_FORCED", targetId: match.id },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(log.metadata).toMatchObject({
+      before: { status: "CREATED", winnerTeam: null },
+      after: { status: "VOTE_REPORTING", winnerTeam: "B" },
+    });
+  });
+
   it("applies Decimal rating changes, creates histories, updates streaks, and confirms match", async () => {
     const { admin, match } = await createReadyMatch({
       strongVotePoints: "12",

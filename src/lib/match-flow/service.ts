@@ -142,8 +142,17 @@ export async function forceResult(adminUserId: string, matchId: string, winnerTe
   }
   return prisma.$transaction(async (tx) => {
     const before = await getMatchWithPlayers(tx, matchId);
-    if (before.status !== "RESULT_REPORTING" && before.status !== "PLAYING") {
-      throw new ApiError(400, "Only PLAYING or RESULT_REPORTING matches can be force-confirmed.");
+    if (before.status === "VOTE_REPORTING") {
+      throw new ApiError(400, "Match result is already confirmed and accepting votes.");
+    }
+    if (before.status === "CONFIRMED") {
+      throw new ApiError(400, "CONFIRMED matches cannot be force-confirmed again.");
+    }
+    if (before.status === "CANCELLED") {
+      throw new ApiError(400, "CANCELLED matches cannot be force-confirmed.");
+    }
+    if (before.status !== "RESULT_REPORTING" && before.status !== "PLAYING" && before.status !== "CREATED") {
+      throw new ApiError(400, "Only CREATED, PLAYING, or RESULT_REPORTING matches can be force-confirmed.");
     }
     validateMatchPlayers(before.players);
     const after = await tx.match.update({
