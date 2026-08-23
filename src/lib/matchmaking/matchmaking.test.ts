@@ -388,6 +388,20 @@ describe("queue and matchmaking service", () => {
     expect(match.players.map((player) => player.userId).sort()).toEqual(players.map((player) => player.id).sort());
   });
 
+  it("creates a match for eight waiting players in under five seconds", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(8);
+    for (const player of players) {
+      await joinQueue(player.id, phase.id);
+    }
+
+    const startedAt = performance.now();
+    const result = await runMatchmaking(phase.id);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.matched).toBe(true);
+    expect(elapsedMs).toBeLessThan(5000);
+  });
+
   it("excludes only players who reached required confirmed matches", async () => {
     const { tournament, phase, players } = await createActiveTournamentWithPhase(16);
     await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 4 } });
@@ -742,6 +756,7 @@ describe("queue and matchmaking service", () => {
 
     const retry = await runMatchmaking(phase.id);
     expect(retry.matched).toBe(false);
+    if (retry.matched) throw new Error("Expected no match");
     expect(retry.reason).toBe("REQUIRED_MATCHES_REACHED");
     expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(0);
   });

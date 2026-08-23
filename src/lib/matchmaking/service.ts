@@ -12,6 +12,7 @@ import { requireUsableTournamentStage } from "@/lib/stage-service";
 import { ensureTestDummiesWaitingForPhaseTx } from "@/lib/test-dummy-queue";
 
 type Tx = Prisma.TransactionClient;
+type DbClient = Tx | typeof prisma;
 const ACTIVE_MATCH_STATUSES = ["CREATED", "PLAYING", "RESULT_REPORTING", "VOTE_REPORTING"] as const;
 const ROOM_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -286,7 +287,7 @@ export async function getQueueStatusLite(userId: string, phaseId: string) {
     : { status: "NOT_QUEUED" as const, matchId: null };
 }
 
-async function recentRelations(tx: Tx, userIds: string[], phaseId: string) {
+async function recentRelations(tx: DbClient, userIds: string[], phaseId: string) {
   const relations = new Map<string, { opponents: Set<string>; teammates: Set<string> }>();
 
   for (const userId of userIds) {
@@ -333,7 +334,7 @@ async function recentRelations(tx: Tx, userIds: string[], phaseId: string) {
   return relations;
 }
 
-async function getWaitingPlayers(tx: Tx, phase: { id: string; tournamentId: string; requiredMatchesPerPlayer: number }) {
+async function getWaitingPlayers(tx: DbClient, phase: { id: string; tournamentId: string; requiredMatchesPerPlayer: number }) {
   const entries = await tx.queueEntry.findMany({
     where: { phaseId: phase.id, status: QueueStatus.WAITING },
     include: {
@@ -462,18 +463,9 @@ async function generateAvailablePrivateRoomCode(tx: Tx) {
   throw new ApiError(500, "プライベートマッチ用コードを生成できませんでした。");
 }
 
-async function selectRoomHostUserId(tx: Tx, players: MatchmakingPlayer[]) {
+function selectRoomHostUserId(players: MatchmakingPlayer[]) {
   const hostCandidates = players.some((player) => !player.isDummy) ? players.filter((player) => !player.isDummy) : players;
-  const userIds = hostCandidates.map((player) => player.userId);
-  const hostCounts = await tx.match.groupBy({
-    by: ["roomHostUserId"],
-    where: { roomHostUserId: { in: userIds } },
-    _count: { roomHostUserId: true },
-  });
-  const countByUserId = new Map(hostCounts.map((row) => [row.roomHostUserId, row._count.roomHostUserId]));
-  const minCount = Math.min(...userIds.map((userId) => countByUserId.get(userId) ?? 0));
-  const candidates = userIds.filter((userId) => (countByUserId.get(userId) ?? 0) === minCount);
-  return candidates[randomInt(candidates.length)];
+  return hostCandidates[randomInt(hostCandidates.length)].userId;
 }
 
 async function selectStageForMatch(
@@ -526,7 +518,7 @@ async function createMatchForSelectedPlayers(params: {
   const selectedStage = await selectStageForMatch(params.tx, params.phase);
   const allPlayers = [...teams.teamA, ...teams.teamB];
   const privateRoomCode = await generateAvailablePrivateRoomCode(params.tx);
-  const roomHostUserId = await selectRoomHostUserId(params.tx, allPlayers);
+  const roomHostUserId = selectRoomHostUserId(allPlayers);
   const match = await params.tx.match.create({
     data: {
       tournamentId: params.phase.tournamentId,
@@ -795,6 +787,104 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
 }
 
 export async function runMatchmaking(phaseId: string) {
+  const preflightPhase = await prisma.tournamentPhase.findUnique({
+    where: { id: phaseId },
+    include: { tournament: true },
+  });
+
+  if (!preflightPhase) {
+    throw new ApiError(404, "Phase not found.");
+  }
+
+  if (preflightPhase.tournament.status !== TournamentStatus.ACTIVE || preflightPhase.status !== TournamentPhaseStatus.ACTIVE) {
+    throw new ApiError(400, "Tournament and phase must be ACTIVE.");
+  }
+
+  await prisma.$transaction((tx) => ensureTestDummiesWaitingForPhaseTx(tx, phaseId), {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 5000,
+    timeout: 15000,
+  });
+
+  const blockCount = await prisma.tournamentBlock.count({ where: { phaseId } });
+  if (blockCount === 0) {
+    const activeConfig = await prisma.tournamentRatingConfig.findFirst({
+      where: { tournamentId: preflightPhase.tournamentId, isActive: true },
+      include: { xpMultiplierTiers: true },
+    });
+
+    if (!activeConfig) {
+      throw new ApiError(400, "Active rating config not found.");
+    }
+
+    validateCompleteRatingConfig(activeConfig);
+
+    const waitingCount = await prisma.queueEntry.count({
+      where: { phaseId, status: QueueStatus.WAITING },
+    });
+
+    if (waitingCount < 8) {
+      return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
+    }
+
+    const waitingPlayers = await getWaitingPlayers(prisma, preflightPhase);
+    const selected = selectEightPlayers(waitingPlayers.players);
+
+    if (!selected) {
+      if (waitingPlayers.summary.waiting >= 8 && waitingPlayers.summary.eligible === 0) {
+        logNoEligiblePlayers({
+          phaseId,
+          mode: "queue",
+          summary: waitingPlayers.summary,
+        });
+      }
+      return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
+    }
+
+    return prisma.$transaction(
+      async (tx) => {
+        const phase = await tx.tournamentPhase.findUnique({
+          where: { id: phaseId },
+          include: { tournament: true },
+        });
+
+        if (!phase) {
+          throw new ApiError(404, "Phase not found.");
+        }
+
+        if (phase.tournament.status !== TournamentStatus.ACTIVE || phase.status !== TournamentPhaseStatus.ACTIVE) {
+          throw new ApiError(400, "Tournament and phase must be ACTIVE.");
+        }
+
+        const queueEntryIds = selected.map((player) => player.queueEntryId);
+        const claimed = await tx.queueEntry.updateMany({
+          where: {
+            id: { in: queueEntryIds },
+            status: QueueStatus.WAITING,
+          },
+          data: {
+            status: QueueStatus.MATCHED,
+            matchedAt: new Date(),
+          },
+        });
+
+        if (claimed.count !== 8) {
+          throw new ApiError(409, "Selected queue entries were changed by another matchmaking run.");
+        }
+
+        const created = await createMatchForSelectedPlayers({ tx, phase, activeConfig, selected, queueEntryIds });
+
+        return {
+          matched: true as const,
+          matchId: created.match.id,
+          teamA: created.teamA,
+          teamB: created.teamB,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 5000, timeout: 15000 },
+    );
+  }
+
   return prisma.$transaction(
     async (tx) => {
       const phase = await tx.tournamentPhase.findUnique({
@@ -809,7 +899,6 @@ export async function runMatchmaking(phaseId: string) {
       if (phase.tournament.status !== TournamentStatus.ACTIVE || phase.status !== TournamentPhaseStatus.ACTIVE) {
         throw new ApiError(400, "Tournament and phase must be ACTIVE.");
       }
-      await ensureTestDummiesWaitingForPhaseTx(tx, phaseId);
 
       const synchronized = await runSynchronizedRoundMatchmaking(tx, phase);
       if (synchronized) return synchronized;
@@ -873,7 +962,7 @@ export async function runMatchmaking(phaseId: string) {
         teamB: created.teamB,
       };
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 5000, timeout: 15000 },
   );
 }
 

@@ -44,6 +44,19 @@ function teammateRepeatPenalty(team: MatchmakingPlayer[]) {
   return penalty;
 }
 
+function fallbackSplit(players: MatchmakingPlayer[]): TeamAssignment {
+  const sorted = [...players].sort((left, right) => right.matchingPower.comparedTo(left.matchingPower));
+  const teamA = [sorted[0], sorted[3], sorted[4], sorted[7]];
+  const teamB = [sorted[1], sorted[2], sorted[5], sorted[6]];
+  return {
+    teamA,
+    teamB,
+    matchingPowerDifference: sumMatchingPower(teamA).sub(sumMatchingPower(teamB)).abs(),
+    averageXpDifference: Math.abs(averageXp(teamA) - averageXp(teamB)),
+    teammateRepeatPenalty: teammateRepeatPenalty(teamA) + teammateRepeatPenalty(teamB),
+  };
+}
+
 export function splitIntoBalancedTeams(players: MatchmakingPlayer[]): TeamAssignment {
   if (players.length !== 8) {
     throw new Error("Exactly 8 players are required.");
@@ -83,7 +96,7 @@ export function splitIntoBalancedTeams(players: MatchmakingPlayer[]): TeamAssign
   }
 
   if (!best) {
-    throw new Error("Could not build teams.");
+    return fallbackSplit(players);
   }
 
   return best;
