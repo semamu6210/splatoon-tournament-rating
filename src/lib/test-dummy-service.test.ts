@@ -358,11 +358,11 @@ describe("test dummies", () => {
     const roundOne = await prisma.match.findMany({ where: { phaseId: phase.id, roundNumber: 1 } });
     expect(roundOne).toHaveLength(4);
 
-    await prisma.match.update({ where: { id: roundOne[0].id }, data: { status: "CONFIRMED" } });
+    await prisma.match.update({ where: { id: roundOne[0].id }, data: { status: "CONFIRMED", ratingAppliedAt: new Date() } });
     await checkAndAdvanceRound(phase.id, 1);
     expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(0);
 
-    await prisma.match.updateMany({ where: { id: { in: roundOne.slice(1).map((match) => match.id) } }, data: { status: "CONFIRMED" } });
+    await prisma.match.updateMany({ where: { id: { in: roundOne.slice(1).map((match) => match.id) } }, data: { status: "CONFIRMED", ratingAppliedAt: new Date() } });
     await checkAndAdvanceRound(phase.id, 1);
     expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(4);
   });

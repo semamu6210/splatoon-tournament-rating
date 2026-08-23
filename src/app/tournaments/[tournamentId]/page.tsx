@@ -13,6 +13,7 @@ import { tournamentPhaseStatusLabel, tournamentPhaseTypeLabel, tournamentStatusL
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { filterTournamentRankingsForViewer, getTournamentRankings } from "@/lib/ranking-service";
+import { currentRoundStatusMessage, shouldShowWaitingForOtherBlocks } from "@/lib/round-status-ui";
 
 export const dynamic = "force-dynamic";
 
@@ -119,6 +120,20 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           select: { id: true },
         })
       : null;
+  const activeRound = activePhase?.rounds[0] ?? null;
+  const myCurrentRoundMatch =
+    session?.user?.id && activePhase && activeRound
+      ? await prisma.match.findFirst({
+          where: {
+            phaseId: activePhase.id,
+            roundNumber: activeRound.roundNumber,
+            players: { some: { userId: session.user.id } },
+            status: { not: "CANCELLED" },
+          },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, status: true, ratingAppliedAt: true },
+        })
+      : null;
   const queueStatus =
     queueEntry?.status === "WAITING"
       ? {
@@ -128,6 +143,8 @@ export default async function TournamentDetailPage({ params }: PageProps) {
         }
       : queueEntry?.status === "MATCHED" && queueEntry.matchId
         ? { status: "MATCHED" as const, matchId: queueEntry.matchId }
+        : myCurrentRoundMatch && myCurrentRoundMatch.status !== "CONFIRMED"
+          ? { status: "MATCHED" as const, matchId: myCurrentRoundMatch.id }
         : activeMatch
           ? { status: "MATCHED" as const, matchId: activeMatch.id }
         : { status: "NOT_QUEUED" as const };
@@ -180,10 +197,16 @@ export default async function TournamentDetailPage({ params }: PageProps) {
       percentage: totalSlots > 0 ? Math.round((completedSlots / totalSlots) * 100) : 0,
     };
   });
-  const activeRound = activePhase?.rounds[0] ?? null;
   const myActivePhaseCount = myRanking?.currentPhase?.confirmedMatchesInPhase ?? 0;
-  const waitingForOtherBlocks =
-    Boolean(activePhase && activeRound && !activeMatch && myRanking?.currentPhase && myActivePhaseCount < activePhase.requiredMatchesPerPlayer);
+  const waitingForOtherBlocks = shouldShowWaitingForOtherBlocks({
+    activePhaseExists: Boolean(activePhase),
+    activeRoundExists: Boolean(activeRound),
+    currentRoundMatch: myCurrentRoundMatch,
+    hasCurrentPhaseRanking: Boolean(myRanking?.currentPhase),
+    confirmedMatchesInPhase: myActivePhaseCount,
+    requiredMatchesPerPlayer: activePhase?.requiredMatchesPerPlayer ?? 0,
+  });
+  const myCurrentRoundStatusMessage = currentRoundStatusMessage(myCurrentRoundMatch, activeRound?.roundNumber);
 
   return (
     <main className="min-h-screen px-5 py-8">
@@ -258,6 +281,16 @@ export default async function TournamentDetailPage({ params }: PageProps) {
                   {Math.min(myRanking.currentPhase.confirmedMatchesInPhase + 1, myRanking.currentPhase.requiredMatchesPerPlayer)}試合 / 全
                   {myRanking.currentPhase.requiredMatchesPerPlayer}試合 / 残り {myRanking.currentPhase.remainingMatchesInPhase}
                 </p>
+              )}
+              {myCurrentRoundStatusMessage && (
+                <div className="grid gap-1 rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                  <p>{myCurrentRoundStatusMessage}</p>
+                  {myCurrentRoundMatch && (
+                    <Link className="w-fit rounded-md bg-zinc-950 px-3 py-2 text-sm font-semibold text-white" href={`/matches/${myCurrentRoundMatch.id}`}>
+                      試合画面を開く
+                    </Link>
+                  )}
+                </div>
               )}
               {waitingForOtherBlocks && (
                 <div className="grid gap-1 rounded-md border border-zinc-200 bg-zinc-50 p-3">

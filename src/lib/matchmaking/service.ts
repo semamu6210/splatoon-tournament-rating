@@ -513,7 +513,22 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
     where: { phaseId: phase.id, status: { in: ["PENDING", "MATCHING", "ACTIVE"] } },
     orderBy: { roundNumber: "asc" },
   });
-  const roundNumber = existingOpenRound?.roundNumber ?? 1;
+  const latestRound = existingOpenRound
+    ? null
+    : await tx.tournamentPhaseRound.findFirst({
+        where: { phaseId: phase.id },
+        orderBy: { roundNumber: "desc" },
+        select: { roundNumber: true },
+      });
+  const roundNumber = existingOpenRound?.roundNumber ?? (latestRound?.roundNumber ?? 0) + 1;
+  if (!existingOpenRound) {
+    if (roundNumber > phase.requiredMatchesPerPlayer) {
+      return { matched: false as const, reason: "REQUIRED_MATCHES_REACHED" as const, roundNumber };
+    }
+    if (await allPhaseTargetsReachedRequiredMatches(tx, phase)) {
+      return { matched: false as const, reason: "REQUIRED_MATCHES_REACHED" as const, roundNumber };
+    }
+  }
   const round = existingOpenRound ?? await tx.tournamentPhaseRound.create({
     data: { phaseId: phase.id, roundNumber, status: "PENDING" },
   });
@@ -584,13 +599,13 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
 
     await tx.tournamentPhaseRoundBlock.update({
       where: { phaseId_blockId_roundNumber: { phaseId: phase.id, blockId: block.id, roundNumber } },
-      data: { status: madeBlockMatch ? "ACTIVE" : "COMPLETED" },
+      data: { status: madeBlockMatch ? "ACTIVE" : "PENDING" },
     });
   }
 
   await tx.tournamentPhaseRound.update({
     where: { id: round.id },
-    data: { status: createdMatchIds.length > 0 ? "ACTIVE" : "COMPLETED", completedAt: createdMatchIds.length > 0 ? null : new Date() },
+    data: { status: createdMatchIds.length > 0 ? "ACTIVE" : "PENDING", completedAt: null },
   });
 
   return {
@@ -601,7 +616,8 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
     matchId: createdMatchIds[0],
   } as
     | { matched: true; roundNumber: number; matchIds: string[]; matchId: string; reason?: undefined }
-    | { matched: false; roundNumber: number; matchIds: string[]; matchId?: undefined; reason: "NO_ELIGIBLE_PLAYERS" };
+    | { matched: false; roundNumber: number; matchIds: string[]; matchId?: undefined; reason: "NO_ELIGIBLE_PLAYERS" }
+    | { matched: false; roundNumber: number; matchId?: undefined; reason: "REQUIRED_MATCHES_REACHED" };
 }
 
 export async function runMatchmaking(phaseId: string) {
@@ -697,6 +713,20 @@ async function allPhaseTargetsReachedRequiredMatches(tx: Tx, phase: { id: string
   return userIds.every((userId) => (completedByUserId.get(userId) ?? 0) >= phase.requiredMatchesPerPlayer);
 }
 
+async function isBlockRoundComplete(tx: Tx, params: { blockUserIds: string[]; phaseId: string; roundNumber: number }) {
+  if (params.blockUserIds.length === 0) return false;
+  const matches = await tx.match.findMany({
+    where: {
+      phaseId: params.phaseId,
+      roundNumber: params.roundNumber,
+      players: { some: { userId: { in: params.blockUserIds } } },
+    },
+    select: { id: true, status: true, ratingAppliedAt: true },
+  });
+
+  return matches.length > 0 && matches.every((match) => match.status === "CONFIRMED" && match.ratingAppliedAt !== null);
+}
+
 export async function checkAndAdvanceRound(phaseId: string, roundNumber: number | null) {
   if (!roundNumber) return { advanced: false as const, reason: "NO_ROUND" as const };
 
@@ -726,15 +756,8 @@ export async function checkAndAdvanceRound(phaseId: string, roundNumber: number 
       let completedBlocks = 0;
       for (const block of blocks) {
         const blockUserIds = block.participants.map((item) => item.tournamentParticipant.userId);
-        const openMatches = await tx.match.count({
-          where: {
-            phaseId,
-            roundNumber,
-            status: { in: [...ACTIVE_MATCH_STATUSES] },
-            players: { some: { userId: { in: blockUserIds } } },
-          },
-        });
-        const blockStatus = openMatches === 0 ? "COMPLETED" : "ACTIVE";
+        const blockComplete = await isBlockRoundComplete(tx, { phaseId, roundNumber, blockUserIds });
+        const blockStatus = blockComplete ? "COMPLETED" : "ACTIVE";
         await tx.tournamentPhaseRoundBlock.upsert({
           where: { phaseId_blockId_roundNumber: { phaseId, blockId: block.id, roundNumber } },
           update: { status: blockStatus },
