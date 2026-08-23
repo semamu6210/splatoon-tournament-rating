@@ -106,7 +106,7 @@ export async function submitResultReport(userId: string, matchId: string, report
   const team = assertTeam(reportedWinnerTeam);
   const match = await prisma.$transaction(async (tx) => {
     const match = await getMatchWithPlayers(tx, matchId);
-    if (match.status !== "RESULT_REPORTING") {
+    if (match.status !== "RESULT_REPORTING" && match.status !== "PLAYING") {
       throw new ApiError(400, "Match is not accepting result reports.");
     }
     if (!match.players.some((player) => player.userId === userId)) {

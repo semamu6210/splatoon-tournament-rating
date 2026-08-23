@@ -304,10 +304,14 @@ export default async function MatchPage({ params }: PageProps) {
         )}
 
         {match.status === "PLAYING" && (
-          <section className="grid gap-3 rounded-md border border-zinc-300 bg-white p-4">
-            <h2 className="text-lg font-semibold">試合中</h2>
-            <MatchPlayingActions hostLabel={hostLabel} isRoomHost={isRoomHost} matchId={match.id} startedAt={match.startedAt?.toISOString() ?? null} />
-          </section>
+          isRoomHost && myPlayer ? (
+            <ResultReportForm matchId={match.id} />
+          ) : (
+            <section className="grid gap-3 rounded-md border border-zinc-300 bg-white p-4">
+              <h2 className="text-lg font-semibold">試合中</h2>
+              <MatchPlayingActions hostLabel={hostLabel} isRoomHost={isRoomHost} matchId={match.id} startedAt={match.startedAt?.toISOString() ?? null} />
+            </section>
+          )
         )}
 
         {match.status === "RESULT_REPORTING" && myPlayer && (
