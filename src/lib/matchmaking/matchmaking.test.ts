@@ -1,5 +1,5 @@
 import { Prisma, TournamentPhaseStatus, UserRole } from "@prisma/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { calculateMatchingPower } from "@/lib/matchmaking/rating";
 import { selectEightPlayers } from "@/lib/matchmaking/selection";
@@ -94,6 +94,44 @@ async function createBlocksForPlayers(phaseId: string, groups: Array<{ name: str
       })),
     });
   }
+}
+
+async function createSnapshotMatch(params: {
+  tournamentId: string;
+  phaseId: string;
+  userIds: string[];
+  status: "CREATED" | "PLAYING" | "RESULT_REPORTING" | "VOTE_REPORTING" | "CONFIRMED";
+  roundNumber?: number;
+}) {
+  const config = await prisma.tournamentRatingConfig.findFirstOrThrow({
+    where: { tournamentId: params.tournamentId, isActive: true },
+  });
+  const matchCount = await prisma.match.count({ where: { phaseId: params.phaseId } });
+  const match = await prisma.match.create({
+    data: {
+      tournamentId: params.tournamentId,
+      phaseId: params.phaseId,
+      ratingConfigId: config.id,
+      ratingConfigVersion: config.version,
+      matchNumber: matchCount + 1,
+      roundNumber: params.roundNumber,
+      status: params.status,
+      ratingAppliedAt: params.status === "CONFIRMED" ? new Date() : null,
+      rule: "AREA",
+    },
+  });
+  await prisma.matchPlayer.createMany({
+    data: params.userIds.map((userId, index) => ({
+      matchId: match.id,
+      userId,
+      team: index % 2 === 0 ? "A" : "B",
+      ratingBefore: "1000",
+      matchingRatingAtMatch: "2500",
+      areaXpAtMatch: 2500,
+      losingStreakAtMatch: 0,
+    })),
+  });
+  return match;
 }
 
 function waitingPlayer(params: {
@@ -334,6 +372,71 @@ describe("queue and matchmaking service", () => {
     expect(result).toEqual({ matched: false, reason: "NOT_ENOUGH_PLAYERS" });
   });
 
+  it("treats eight waiting players with 0 of 4 confirmed phase matches as eligible", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(8);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 4 } });
+    for (const player of players) {
+      await joinQueue(player.id, phase.id);
+    }
+
+    const result = await runMatchmaking(phase.id);
+    expect(result.matched).toBe(true);
+    if (!result.matched) throw new Error("Expected match");
+
+    const match = await prisma.match.findUniqueOrThrow({ where: { id: result.matchId }, include: { players: true } });
+    expect(match.players).toHaveLength(8);
+    expect(match.players.map((player) => player.userId).sort()).toEqual(players.map((player) => player.id).sort());
+  });
+
+  it("excludes only players who reached required confirmed matches", async () => {
+    const { tournament, phase, players } = await createActiveTournamentWithPhase(16);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 4 } });
+    for (const player of players) {
+      await joinQueue(player.id, phase.id);
+    }
+    for (let index = 0; index < 4; index += 1) {
+      await createSnapshotMatch({
+        tournamentId: tournament.id,
+        phaseId: phase.id,
+        userIds: players.slice(0, 8).map((player) => player.id),
+        status: "CONFIRMED",
+      });
+    }
+
+    const result = await runMatchmaking(phase.id);
+    expect(result.matched).toBe(true);
+    if (!result.matched) throw new Error("Expected match");
+
+    const match = await prisma.match.findUniqueOrThrow({ where: { id: result.matchId }, include: { players: true } });
+    expect(match.players.map((player) => player.userId).sort()).toEqual(players.slice(8, 16).map((player) => player.id).sort());
+  });
+
+  it("excludes only players in unfinished matches and lets confirmed match players queue again", async () => {
+    const { tournament, phase, players } = await createActiveTournamentWithPhase(16);
+    for (const player of players) {
+      await joinQueue(player.id, phase.id);
+    }
+    await createSnapshotMatch({
+      tournamentId: tournament.id,
+      phaseId: phase.id,
+      userIds: players.slice(0, 8).map((player) => player.id),
+      status: "CONFIRMED",
+    });
+    await createSnapshotMatch({
+      tournamentId: tournament.id,
+      phaseId: phase.id,
+      userIds: players.slice(8, 16).map((player) => player.id),
+      status: "CREATED",
+    });
+
+    const result = await runMatchmaking(phase.id);
+    expect(result.matched).toBe(true);
+    if (!result.matched) throw new Error("Expected match");
+
+    const match = await prisma.match.findUniqueOrThrow({ where: { id: result.matchId }, include: { players: true } });
+    expect(match.players.map((player) => player.userId).sort()).toEqual(players.slice(0, 8).map((player) => player.id).sort());
+  });
+
   it("auto-runs matchmaking on queue join when the 8th player arrives", async () => {
     const { phase, players } = await createActiveTournamentWithPhase(8);
     for (let index = 0; index < 7; index += 1) {
@@ -547,6 +650,64 @@ describe("queue and matchmaking service", () => {
     const roundTwoMatches = await prisma.match.findMany({ where: { phaseId: phase.id, roundNumber: 2 } });
     expect(roundTwoMatches).toHaveLength(2);
     expect(new Set(roundTwoMatches.map((match) => match.id))).toHaveLength(2);
+  });
+
+  it("keeps block participants eligible before round one matches exist", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(8);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 4 } });
+    await createBlocksForPlayers(phase.id, [{ name: "A", players }]);
+
+    const result = await runMatchmaking(phase.id);
+    expect(result.matched).toBe(true);
+    expect("roundNumber" in result ? result.roundNumber : null).toBe(1);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 1 } })).toBe(1);
+  });
+
+  it("keeps 1 of 4 confirmed block participants eligible when round two starts", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(8);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 4 } });
+    await createBlocksForPlayers(phase.id, [{ name: "A", players }]);
+
+    await runMatchmaking(phase.id);
+    await prisma.match.updateMany({ where: { phaseId: phase.id, roundNumber: 1 }, data: { status: "CONFIRMED", ratingAppliedAt: new Date() } });
+    const advanced = await checkAndAdvanceRound(phase.id, 1);
+
+    expect(advanced.advanced).toBe(true);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(1);
+  });
+
+  it("logs exclusion counts when synchronized round has no eligible players", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { phase, players } = await createActiveTournamentWithPhase(8);
+    await createBlocksForPlayers(phase.id, [{ name: "A", players }]);
+    const participants = await prisma.tournamentParticipant.findMany({
+      where: { tournamentId: phase.tournamentId },
+      select: { id: true },
+    });
+    await prisma.tournamentPhaseParticipant.createMany({
+      data: participants.map((participant) => ({
+        phaseId: phase.id,
+        tournamentParticipantId: participant.id,
+        isEligible: false,
+      })),
+    });
+
+    const result = await runMatchmaking(phase.id);
+
+    expect(result).toMatchObject({ matched: false, reason: "NO_ELIGIBLE_PLAYERS", roundNumber: 1 });
+    expect(warn).toHaveBeenCalledWith(
+      "MATCHMAKING_NO_ELIGIBLE_PLAYERS",
+      expect.objectContaining({
+        phaseId: phase.id,
+        mode: "synchronized-round",
+        summary: expect.objectContaining({
+          waiting: 8,
+          eligible: 0,
+          excluded: expect.objectContaining({ notPhaseEligible: 8 }),
+        }),
+      }),
+    );
+    warn.mockRestore();
   });
 
   it("does not create a next round after required matches are reached", async () => {

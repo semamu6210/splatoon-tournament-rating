@@ -15,6 +15,62 @@ type Tx = Prisma.TransactionClient;
 const ACTIVE_MATCH_STATUSES = ["CREATED", "PLAYING", "RESULT_REPORTING", "VOTE_REPORTING"] as const;
 const ROOM_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+type MatchmakingExclusionSummary = {
+  waiting: number;
+  excluded: {
+    inactiveParticipant: number;
+    missingAreaXp: number;
+    missingRating: number;
+    missingRatingInitialized: number;
+    notPhaseEligible: number;
+    requiredMatchesReached: number;
+    unfinishedMatch: number;
+    wrongBlock: number;
+    wrongRound: number;
+  };
+  eligible: number;
+};
+
+function emptyExclusionSummary(waiting: number): MatchmakingExclusionSummary {
+  return {
+    waiting,
+    excluded: {
+      inactiveParticipant: 0,
+      missingAreaXp: 0,
+      missingRating: 0,
+      missingRatingInitialized: 0,
+      notPhaseEligible: 0,
+      requiredMatchesReached: 0,
+      unfinishedMatch: 0,
+      wrongBlock: 0,
+      wrongRound: 0,
+    },
+    eligible: 0,
+  };
+}
+
+function logNoEligiblePlayers(context: {
+  phaseId: string;
+  roundNumber?: number;
+  mode: "queue" | "synchronized-round";
+  summary: MatchmakingExclusionSummary;
+  blockSummaries?: Array<{ blockId: string; eligible: number; waiting: number; excluded: MatchmakingExclusionSummary["excluded"] }>;
+}) {
+  console.warn("MATCHMAKING_NO_ELIGIBLE_PLAYERS", context);
+}
+
+function addExcludedCounts(target: MatchmakingExclusionSummary["excluded"], source: MatchmakingExclusionSummary["excluded"]) {
+  target.inactiveParticipant += source.inactiveParticipant;
+  target.missingAreaXp += source.missingAreaXp;
+  target.missingRating += source.missingRating;
+  target.missingRatingInitialized += source.missingRatingInitialized;
+  target.notPhaseEligible += source.notPhaseEligible;
+  target.requiredMatchesReached += source.requiredMatchesReached;
+  target.unfinishedMatch += source.unfinishedMatch;
+  target.wrongBlock += source.wrongBlock;
+  target.wrongRound += source.wrongRound;
+}
+
 async function ensurePhaseForQueue(phaseId: string) {
   const phase = await prisma.tournamentPhase.findUnique({
     where: { id: phaseId },
@@ -277,9 +333,9 @@ async function recentRelations(tx: Tx, userIds: string[], phaseId: string) {
   return relations;
 }
 
-async function getWaitingPlayers(tx: Tx, phaseId: string, requiredMatchesPerPlayer: number) {
+async function getWaitingPlayers(tx: Tx, phase: { id: string; tournamentId: string; requiredMatchesPerPlayer: number }) {
   const entries = await tx.queueEntry.findMany({
-    where: { phaseId, status: QueueStatus.WAITING },
+    where: { phaseId: phase.id, status: QueueStatus.WAITING },
     include: {
       user: {
         include: {
@@ -291,27 +347,62 @@ async function getWaitingPlayers(tx: Tx, phaseId: string, requiredMatchesPerPlay
   });
 
   const userIds = entries.map((entry) => entry.userId);
-  const relations = await recentRelations(tx, userIds, phaseId);
+  const relations = await recentRelations(tx, userIds, phase.id);
   const confirmedCounts = await tx.matchPlayer.groupBy({
     by: ["userId"],
-    where: { userId: { in: userIds }, match: { phaseId, status: "CONFIRMED" } },
+    where: { userId: { in: userIds }, match: { phaseId: phase.id, status: "CONFIRMED" } },
     _count: { userId: true },
   });
   const confirmedCountByUserId = new Map(confirmedCounts.map((count) => [count.userId, count._count.userId]));
+  const openPlayers = await tx.matchPlayer.findMany({
+    where: {
+      userId: { in: userIds },
+      match: { phaseId: phase.id, status: { in: [...ACTIVE_MATCH_STATUSES] } },
+    },
+    select: { userId: true },
+  });
+  const openUserIds = new Set(openPlayers.map((player) => player.userId));
+  const phaseRelations = await tx.tournamentPhaseParticipant.findMany({
+    where: { phaseId: phase.id, tournamentParticipant: { userId: { in: userIds } } },
+    select: { isEligible: true, tournamentParticipant: { select: { userId: true } } },
+  });
+  const hasPhaseRelations = phaseRelations.length > 0;
+  const phaseEligibleByUserId = new Map(phaseRelations.map((relation) => [relation.tournamentParticipant.userId, relation.isEligible]));
   const players: WaitingPlayer[] = [];
+  const summary = emptyExclusionSummary(entries.length);
 
   for (const entry of entries) {
-    const participant = entry.user.participants.find(
-      (item) => item.tournamentId === entry.tournamentId && item.isActive,
-    );
+    const participant = entry.user.participants.find((item) => item.tournamentId === phase.tournamentId);
 
-    if (!participant?.rating) {
+    if (!participant?.isActive) {
+      summary.excluded.inactiveParticipant += 1;
+      continue;
+    }
+    if (!participant.rating) {
+      summary.excluded.missingRating += 1;
+      continue;
+    }
+    if (!participant.ratingInitializedAt) {
+      summary.excluded.missingRatingInitialized += 1;
+      continue;
+    }
+    if (!Number.isFinite(participant.areaXp)) {
+      summary.excluded.missingAreaXp += 1;
+      continue;
+    }
+    if (hasPhaseRelations && phaseEligibleByUserId.get(entry.userId) !== true) {
+      summary.excluded.notPhaseEligible += 1;
       continue;
     }
 
     const relation = relations.get(entry.userId);
     const completedMatchesInPhase = confirmedCountByUserId.get(entry.userId) ?? 0;
-    if (completedMatchesInPhase >= requiredMatchesPerPlayer) {
+    if (completedMatchesInPhase >= phase.requiredMatchesPerPlayer) {
+      summary.excluded.requiredMatchesReached += 1;
+      continue;
+    }
+    if (openUserIds.has(entry.userId)) {
+      summary.excluded.unfinishedMatch += 1;
       continue;
     }
 
@@ -329,7 +420,8 @@ async function getWaitingPlayers(tx: Tx, phaseId: string, requiredMatchesPerPlay
     });
   }
 
-  return players;
+  summary.eligible = players.length;
+  return { players, summary };
 }
 
 async function getConfirmedCountsByUserId(tx: Tx, phaseId: string, userIds: string[]) {
@@ -549,6 +641,8 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
   validateCompleteRatingConfig(activeConfig);
 
   const createdMatchIds: string[] = [];
+  const totalSummary = emptyExclusionSummary(blocks.reduce((sum, block) => sum + block.participants.length, 0));
+  const blockSummaries: Array<{ blockId: string; eligible: number; waiting: number; excluded: MatchmakingExclusionSummary["excluded"] }> = [];
   for (const block of blocks) {
     await tx.tournamentPhaseRoundBlock.upsert({
       where: { phaseId_blockId_roundNumber: { phaseId: phase.id, blockId: block.id, roundNumber } },
@@ -556,8 +650,15 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
       create: { phaseId: phase.id, blockId: block.id, roundId: round.id, roundNumber, status: "MATCHING" },
     });
 
-    const participants = block.participants.map((item) => item.tournamentParticipant).filter((participant) => participant.isActive && participant.rating);
-    const userIds = participants.map((participant) => participant.userId);
+    const blockParticipants = block.participants.map((item) => item.tournamentParticipant);
+    const blockSummary = emptyExclusionSummary(blockParticipants.length);
+    const userIds = blockParticipants.map((participant) => participant.userId);
+    const phaseRelations = await tx.tournamentPhaseParticipant.findMany({
+      where: { phaseId: phase.id, tournamentParticipantId: { in: blockParticipants.map((participant) => participant.id) } },
+      select: { tournamentParticipantId: true, isEligible: true },
+    });
+    const hasPhaseRelations = phaseRelations.length > 0;
+    const phaseEligibleByParticipantId = new Map(phaseRelations.map((relation) => [relation.tournamentParticipantId, relation.isEligible]));
     const completedByUserId = await getConfirmedCountsByUserId(tx, phase.id, userIds);
     const openPlayers = await tx.matchPlayer.findMany({
       where: {
@@ -567,15 +668,49 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
       select: { userId: true },
     });
     const openUserIds = new Set(openPlayers.map((player) => player.userId));
-    const candidates = participants
-      .filter((participant) => (completedByUserId.get(participant.userId) ?? 0) < phase.requiredMatchesPerPlayer)
-      .filter((participant) => !openUserIds.has(participant.userId))
-      .sort((left, right) => {
-        const leftCount = completedByUserId.get(left.userId) ?? 0;
-        const rightCount = completedByUserId.get(right.userId) ?? 0;
-        if (leftCount !== rightCount) return leftCount - rightCount;
-        return new Prisma.Decimal(left.rating ?? 0).comparedTo(right.rating ?? 0);
-      });
+    const candidates = [];
+    for (const participant of blockParticipants) {
+      if (!participant.isActive) {
+        blockSummary.excluded.inactiveParticipant += 1;
+        continue;
+      }
+      if (!participant.rating) {
+        blockSummary.excluded.missingRating += 1;
+        continue;
+      }
+      if (!participant.ratingInitializedAt) {
+        blockSummary.excluded.missingRatingInitialized += 1;
+        continue;
+      }
+      if (!Number.isFinite(participant.areaXp)) {
+        blockSummary.excluded.missingAreaXp += 1;
+        continue;
+      }
+      if (hasPhaseRelations && phaseEligibleByParticipantId.get(participant.id) !== true) {
+        blockSummary.excluded.notPhaseEligible += 1;
+        continue;
+      }
+      const completedMatchesInPhase = completedByUserId.get(participant.userId) ?? 0;
+      if (completedMatchesInPhase >= phase.requiredMatchesPerPlayer) {
+        blockSummary.excluded.requiredMatchesReached += 1;
+        continue;
+      }
+      if (openUserIds.has(participant.userId)) {
+        blockSummary.excluded.unfinishedMatch += 1;
+        continue;
+      }
+      candidates.push(participant);
+    }
+    candidates.sort((left, right) => {
+      const leftCount = completedByUserId.get(left.userId) ?? 0;
+      const rightCount = completedByUserId.get(right.userId) ?? 0;
+      if (leftCount !== rightCount) return leftCount - rightCount;
+      return new Prisma.Decimal(left.rating ?? 0).comparedTo(right.rating ?? 0);
+    });
+    blockSummary.eligible = candidates.length;
+    totalSummary.eligible += blockSummary.eligible;
+    addExcludedCounts(totalSummary.excluded, blockSummary.excluded);
+    blockSummaries.push({ blockId: block.id, waiting: blockSummary.waiting, eligible: blockSummary.eligible, excluded: blockSummary.excluded });
 
     let madeBlockMatch = false;
     for (let index = 0; index + 8 <= candidates.length; index += 8) {
@@ -607,6 +742,16 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
     where: { id: round.id },
     data: { status: createdMatchIds.length > 0 ? "ACTIVE" : "PENDING", completedAt: null },
   });
+
+  if (createdMatchIds.length === 0) {
+    logNoEligiblePlayers({
+      phaseId: phase.id,
+      roundNumber,
+      mode: "synchronized-round",
+      summary: totalSummary,
+      blockSummaries,
+    });
+  }
 
   return {
     matched: createdMatchIds.length > 0,
@@ -659,10 +804,17 @@ export async function runMatchmaking(phaseId: string) {
         return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
       }
 
-      const waitingPlayers = await getWaitingPlayers(tx, phaseId, phase.requiredMatchesPerPlayer);
-      const selected = selectEightPlayers(waitingPlayers);
+      const waitingPlayers = await getWaitingPlayers(tx, phase);
+      const selected = selectEightPlayers(waitingPlayers.players);
 
       if (!selected) {
+        if (waitingPlayers.summary.waiting >= 8 && waitingPlayers.summary.eligible === 0) {
+          logNoEligiblePlayers({
+            phaseId,
+            mode: "queue",
+            summary: waitingPlayers.summary,
+          });
+        }
         return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
       }
 
