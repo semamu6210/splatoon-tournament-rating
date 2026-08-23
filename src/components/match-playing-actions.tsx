@@ -26,10 +26,13 @@ export function MatchPlayingActions({ hostLabel, isRoomHost, matchId, startedAt 
   }, [startedAt]);
 
   const canOpenResultReporting = remainingSeconds === 0;
+  const canRoomHostOpenResultReporting = isRoomHost || canOpenResultReporting;
 
   return (
     <>
-      {!canOpenResultReporting ? (
+      {isRoomHost ? (
+        <p className="text-sm text-zinc-600">Splatoonでの試合が終わったら、試合終了を押してください。</p>
+      ) : !canOpenResultReporting ? (
         <div className="grid gap-1 text-sm text-zinc-600">
           <p>結果報告は試合開始1分後から可能です。</p>
           <p>結果報告まで {remainingSeconds}秒</p>
@@ -37,7 +40,7 @@ export function MatchPlayingActions({ hostLabel, isRoomHost, matchId, startedAt 
       ) : (
         <p className="text-sm text-zinc-600">Splatoonでの試合が終わったら、部屋主が試合終了を押してください。</p>
       )}
-      {isRoomHost && canOpenResultReporting && (
+      {isRoomHost && canRoomHostOpenResultReporting && (
         <ApiButton url={`/api/matches/${matchId}/open-result-reporting`}>
           試合終了
         </ApiButton>

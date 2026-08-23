@@ -24,8 +24,8 @@ const RATING_TRANSACTION_OPTIONS = {
 } as const;
 const RESULT_REPORT_DELAY_MS = 60_000;
 
-function assertResultReportDelayElapsed(match: { startedAt: Date | null }, role?: UserRole) {
-  if (role && canManage(role)) return;
+function assertResultReportDelayElapsed(match: { startedAt: Date | null }, role?: UserRole, bypassDelay = false) {
+  if (bypassDelay || (role && canManage(role))) return;
   if (!match.startedAt || Date.now() - match.startedAt.getTime() < RESULT_REPORT_DELAY_MS) {
     throw new ApiError(400, "試合開始から1分経過するまで結果報告できません。");
   }
@@ -91,10 +91,11 @@ export async function openResultReporting(matchId: string, userId?: string, role
     if (match.status !== "PLAYING") {
       throw new ApiError(400, "Only PLAYING matches can open result reporting.");
     }
-    if (userId && !canOperateAsHostOrAdmin(match, userId, role)) {
+    const canOperate = canOperateAsHostOrAdmin(match, userId, role);
+    if (userId && !canOperate) {
       throw new ApiError(403, "Only the room host or admin can end the match.");
     }
-    assertResultReportDelayElapsed(match, role);
+    assertResultReportDelayElapsed(match, role, canOperate);
     const updated = await tx.match.update({ where: { id: matchId }, data: { status: "RESULT_REPORTING" } });
     await touchMatchStatusEventTx(tx, matchId, updated);
     return updated;
@@ -113,10 +114,11 @@ export async function submitResultReport(userId: string, matchId: string, report
         throw new ApiError(403, "Only match players can report results.");
       }
     }
-    if (!canOperateAsHostOrAdmin(match, userId, role)) {
+    const canOperate = canOperateAsHostOrAdmin(match, userId, role);
+    if (!canOperate) {
       throw new ApiError(403, "Only the room host or admin can confirm the result.");
     }
-    assertResultReportDelayElapsed(match, role);
+    assertResultReportDelayElapsed(match, role, canOperate);
     await tx.matchResultReport.upsert({
       where: { matchId_userId: { matchId, userId } },
       update: { reportedWinnerTeam: team },
