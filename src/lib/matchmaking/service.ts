@@ -645,9 +645,23 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
   const round = existingOpenRound ?? await tx.tournamentPhaseRound.create({
     data: { phaseId: phase.id, roundNumber, status: "PENDING" },
   });
+  const activeMatchesInRound =
+    round.status === "ACTIVE"
+      ? await tx.match.count({
+          where: {
+            phaseId: phase.id,
+            roundNumber,
+            status: { in: [...ACTIVE_MATCH_STATUSES] },
+          },
+        })
+      : 0;
+  const claimableStatuses =
+    round.status === "ACTIVE" && activeMatchesInRound === 0
+      ? (["ACTIVE"] as const)
+      : (["PENDING", "COMPLETED"] as const);
 
   const claimed = await tx.tournamentPhaseRound.updateMany({
-    where: { id: round.id, status: { in: ["PENDING", "COMPLETED"] } },
+    where: { id: round.id, status: { in: [...claimableStatuses] } },
     data: { status: "MATCHING", startedAt: new Date() },
   });
   if (claimed.count !== 1) {
