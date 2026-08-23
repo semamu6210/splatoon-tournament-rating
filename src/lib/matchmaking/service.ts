@@ -594,12 +594,41 @@ async function createMatchForSelectedPlayers(params: {
 
 async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType<Tx["tournamentPhase"]["findUnique"]>> & { tournament: { status: TournamentStatus } }) {
   if (!phase) throw new ApiError(404, "Phase not found.");
-  const blocks = await tx.tournamentBlock.findMany({
+  let blocks = await tx.tournamentBlock.findMany({
     where: { phaseId: phase.id },
     include: { participants: { include: { tournamentParticipant: true } } },
     orderBy: { sortOrder: "asc" },
   });
   if (blocks.length === 0) return null;
+  const assignedParticipantIds = new Set(blocks.flatMap((block) => block.participants.map((item) => item.tournamentParticipantId)));
+  const phaseTargets = await tx.tournamentPhaseParticipant.findMany({
+    where: { phaseId: phase.id, isEligible: true, tournamentParticipant: { isActive: true, rating: { not: null } } },
+    include: { tournamentParticipant: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const assignmentTargets =
+    phaseTargets.length > 0
+      ? phaseTargets.map((target) => target.tournamentParticipant)
+      : await tx.tournamentParticipant.findMany({
+          where: { tournamentId: phase.tournamentId, isActive: true, rating: { not: null } },
+          orderBy: { joinedAt: "asc" },
+        });
+  const missingAssignments = assignmentTargets.filter((participant) => !assignedParticipantIds.has(participant.id));
+  if (missingAssignments.length > 0) {
+    const blockLoads = blocks.map((block) => ({ blockId: block.id, count: block.participants.length }));
+    const assignments = missingAssignments.map((participant) => {
+      blockLoads.sort((left, right) => left.count - right.count);
+      const targetBlock = blockLoads[0];
+      targetBlock.count += 1;
+      return { phaseId: phase.id, blockId: targetBlock.blockId, tournamentParticipantId: participant.id };
+    });
+    await tx.tournamentBlockParticipant.createMany({ data: assignments, skipDuplicates: true });
+    blocks = await tx.tournamentBlock.findMany({
+      where: { phaseId: phase.id },
+      include: { participants: { include: { tournamentParticipant: true } } },
+      orderBy: { sortOrder: "asc" },
+    });
+  }
 
   const existingOpenRound = await tx.tournamentPhaseRound.findFirst({
     where: { phaseId: phase.id, status: { in: ["PENDING", "MATCHING", "ACTIVE"] } },

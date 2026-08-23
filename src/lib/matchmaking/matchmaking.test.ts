@@ -663,6 +663,21 @@ describe("queue and matchmaking service", () => {
     expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 1 } })).toBe(1);
   });
 
+  it("repairs missing block assignments for eligible phase participants before synchronized matchmaking", async () => {
+    const { phase } = await createActiveTournamentWithPhase(8);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 4 } });
+    await prisma.tournamentBlock.create({
+      data: { phaseId: phase.id, name: "A", sortOrder: 1 },
+    });
+
+    const result = await runMatchmaking(phase.id);
+
+    expect(result.matched).toBe(true);
+    expect("roundNumber" in result ? result.roundNumber : null).toBe(1);
+    expect(await prisma.tournamentBlockParticipant.count({ where: { phaseId: phase.id } })).toBe(8);
+    expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 1 } })).toBe(1);
+  });
+
   it("keeps 1 of 4 confirmed block participants eligible when round two starts", async () => {
     const { phase, players } = await createActiveTournamentWithPhase(8);
     await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 4 } });
