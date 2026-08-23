@@ -532,7 +532,8 @@ async function createMatchForSelectedPlayers(params: {
       stageName: selectedStage?.name,
       privateRoomCode,
       roomHostUserId,
-      status: "CREATED",
+      status: "PLAYING",
+      startedAt: new Date(),
     },
   });
 
