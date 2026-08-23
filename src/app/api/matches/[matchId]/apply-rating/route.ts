@@ -8,7 +8,7 @@ export async function POST(_request: Request, context: Context) {
   try {
     await requireAdmin();
     const { matchId } = (await context.params) as { matchId: string };
-    const match = await applyRating(matchId);
+    const match = await applyRating(matchId, { closeVotingBeforeApply: true });
     return ok({ match });
   } catch (error) {
     return fail(error);

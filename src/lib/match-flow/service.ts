@@ -369,9 +369,16 @@ export async function cancelMatch(adminUserId: string, matchId: string, reason: 
   });
 }
 
-async function applyRatingOnce(matchId: string) {
+async function applyRatingOnce(matchId: string, options: { closeVotingBeforeApply?: boolean } = {}) {
   return prisma.$transaction(
     async (tx) => {
+      if (options.closeVotingBeforeApply) {
+        const closedAt = new Date();
+        await tx.match.updateMany({
+          where: { id: matchId, status: "VOTE_REPORTING", ratingAppliedAt: null, votingClosedAt: null },
+          data: { votingClosedAt: closedAt },
+        });
+      }
       const claimed = await tx.match.updateMany({
         where: { id: matchId, ratingAppliedAt: null, status: "VOTE_REPORTING" },
         data: { ratingAppliedAt: new Date() },
@@ -482,9 +489,9 @@ async function applyRatingOnce(matchId: string) {
   );
 }
 
-export async function applyRating(matchId: string) {
+export async function applyRating(matchId: string, options: { closeVotingBeforeApply?: boolean } = {}) {
   try {
-    const match = await applyRatingOnce(matchId);
+    const match = await applyRatingOnce(matchId, options);
     await ensureTestDummiesWaitingForPhase(match.phaseId);
     await checkAndAdvanceRound(match.phaseId, match.roundNumber);
     return match;
