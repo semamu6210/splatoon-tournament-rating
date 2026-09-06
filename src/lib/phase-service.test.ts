@@ -250,6 +250,53 @@ describe("phase progression", () => {
     expect(mainTargets).toHaveLength(2);
   });
 
+  it("marks existing ineligible main-event target rows eligible when confirming qualifier advancement", async () => {
+    const { admin, tournament, players } = await createActiveTournament(8);
+    const qualifier = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.ACTIVE,
+        requiredMatchesPerPlayer: 1,
+        advancePlayerCount: 2,
+        sortOrder: 1,
+      },
+    });
+    const mainEvent = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "MAIN_EVENT",
+        status: TournamentPhaseStatus.PENDING,
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 2,
+      },
+    });
+    for (let index = 0; index < players.length; index += 1) {
+      await prisma.tournamentParticipant.update({
+        where: { tournamentId_userId: { tournamentId: tournament.id, userId: players[index].id } },
+        data: { rating: 2000 - index },
+      });
+    }
+    const participants = await prisma.tournamentParticipant.findMany({
+      where: { tournamentId: tournament.id },
+      orderBy: { rating: "desc" },
+    });
+    await prisma.tournamentPhaseParticipant.createMany({
+      data: participants.slice(0, 2).map((participant) => ({
+        phaseId: mainEvent.id,
+        tournamentParticipantId: participant.id,
+        isEligible: false,
+      })),
+    });
+    await createConfirmedMatchForUsers(tournament.id, qualifier.id, players.map((player) => player.id));
+    await completePhase(admin.id, qualifier.id);
+
+    const result = await confirmQualifierAdvancement(admin.id, qualifier.id);
+
+    expect(result.advancingIds).toHaveLength(2);
+    expect(await prisma.tournamentPhaseParticipant.count({ where: { phaseId: mainEvent.id, isEligible: true } })).toBe(2);
+  });
+
   it("starts main event ratings from 1000 while keeping qualifier ranking separate", async () => {
     const { admin, tournament, players } = await createActiveTournament(8);
     const qualifier = await prisma.tournamentPhase.create({

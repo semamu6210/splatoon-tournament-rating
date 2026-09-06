@@ -545,6 +545,10 @@ export async function confirmQualifierAdvancement(adminUserId: string, phaseId: 
           where: { id: { in: advancingIds } },
           data: { advancedToMainEvent: true },
         });
+        await tx.tournamentPhaseParticipant.updateMany({
+          where: { phaseId: mainPhase.id },
+          data: { isEligible: false, isAdvancing: false, advancedAt: null },
+        });
         await tx.tournamentPhaseParticipant.createMany({
           data: advancingIds.map((id) => ({
             phaseId: mainPhase.id,
@@ -553,6 +557,10 @@ export async function confirmQualifierAdvancement(adminUserId: string, phaseId: 
             isAdvancing: false,
           })),
           skipDuplicates: true,
+        });
+        await tx.tournamentPhaseParticipant.updateMany({
+          where: { phaseId: mainPhase.id, tournamentParticipantId: { in: advancingIds } },
+          data: { isEligible: true, isAdvancing: false },
         });
         await tx.adminActionLog.create({
           data: {
