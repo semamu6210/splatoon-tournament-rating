@@ -167,6 +167,7 @@ describe("test dummies", () => {
     });
     expect(dummyAfter.every((dummy) => dummy.matchesPlayed === 1 && dummy.rating !== null)).toBe(true);
     expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING", userId: { in: dummyAfter.map((dummy) => dummy.userId) } } })).toBe(6);
+    expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING", userId: { in: [realA.id, realB.id] } } })).toBe(2);
 
     voteRows = await prisma.playerVote.findMany({ where: { matchId: match.id } });
     for (const voterId of new Set(voteRows.map((vote) => vote.voterUserId))) {

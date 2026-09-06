@@ -6,7 +6,7 @@ import { checkAndAdvanceRound } from "@/lib/matchmaking/service";
 import { canManage } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { touchMatchStatusEventTx } from "@/lib/realtime-status-events";
-import { ensureTestDummiesWaitingForPhase } from "@/lib/test-dummy-queue";
+import { ensureMatchPlayersWaitingForQueuePhase, ensureTestDummiesWaitingForPhase } from "@/lib/test-dummy-queue";
 import { submitAutomaticTestVotes } from "@/lib/test-dummy-votes";
 
 type Tx = Prisma.TransactionClient;
@@ -494,6 +494,7 @@ export async function applyRating(matchId: string, options: { closeVotingBeforeA
   try {
     const match = await applyRatingOnce(matchId, options);
     await ensureTestDummiesWaitingForPhase(match.phaseId);
+    await ensureMatchPlayersWaitingForQueuePhase(match.id);
     await checkAndAdvanceRound(match.phaseId, match.roundNumber);
     return match;
   } catch (error) {

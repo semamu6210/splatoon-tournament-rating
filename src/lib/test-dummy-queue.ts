@@ -1,6 +1,7 @@
 import { Prisma, type TournamentPhase } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { touchQueueStatusEventTx } from "@/lib/realtime-status-events";
 
 type Tx = Prisma.TransactionClient;
 
@@ -97,6 +98,59 @@ export async function ensureTestDummiesWaitingForPhaseTx(tx: Tx, phaseId: string
 
 export async function ensureTestDummiesWaitingForPhase(phaseId: string) {
   return prisma.$transaction((tx) => ensureTestDummiesWaitingForPhaseTx(tx, phaseId));
+}
+
+export async function ensureMatchPlayersWaitingForQueuePhase(matchId: string) {
+  return prisma.$transaction(async (tx) => {
+    const match = await tx.match.findUnique({
+      where: { id: matchId },
+      include: {
+        phase: true,
+        players: { select: { userId: true } },
+      },
+    });
+    if (!match || match.status !== "CONFIRMED" || match.phase.status !== "ACTIVE") {
+      return { queued: 0, eligible: 0 };
+    }
+
+    const blockCount = await tx.tournamentBlock.count({ where: { phaseId: match.phaseId } });
+    if (blockCount > 0) {
+      return { queued: 0, eligible: 0 };
+    }
+
+    const userIds = match.players.map((player) => player.userId);
+    const participants = await tx.tournamentParticipant.findMany({
+      where: {
+        tournamentId: match.tournamentId,
+        userId: { in: userIds },
+        isActive: true,
+        rating: { not: null },
+      },
+    });
+    const participantUserIds = participants.map((participant) => participant.userId);
+    const counts = await confirmedCountsByUser(tx, match.phaseId, participantUserIds);
+    const openMatchUserIds = await hasOpenMatchByUser(tx, participantUserIds);
+    const waitingUserIds = await existingWaitingByUser(tx, match.phaseId, participantUserIds);
+    const eligible = participants.filter((participant) => {
+      const completed = counts.get(participant.userId) ?? 0;
+      return completed < match.phase.requiredMatchesPerPlayer && !openMatchUserIds.has(participant.userId);
+    });
+    const toQueue = eligible.filter((participant) => !waitingUserIds.has(participant.userId));
+
+    for (const participant of toQueue) {
+      const entry = await tx.queueEntry.create({
+        data: {
+          tournamentId: match.tournamentId,
+          phaseId: match.phaseId,
+          userId: participant.userId,
+          status: "WAITING",
+        },
+      });
+      await touchQueueStatusEventTx(tx, { phaseId: match.phaseId, queueEntryId: entry.id, status: "WAITING" });
+    }
+
+    return { queued: toQueue.length, eligible: eligible.length };
+  });
 }
 
 export async function getTestDummyPhaseStatuses(tournamentId: string) {
