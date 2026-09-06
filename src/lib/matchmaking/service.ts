@@ -274,6 +274,12 @@ export async function getQueueStatusLite(userId: string, phaseId: string) {
     };
   }
 
+  const activeRound = await prisma.tournamentPhaseRound.findFirst({
+    where: { phaseId, status: { in: ["PENDING", "MATCHING", "ACTIVE"] } },
+    orderBy: { roundNumber: "asc" },
+    select: { roundNumber: true },
+  });
+
   const fallbackMatch = await prisma.match.findFirst({
     where: {
       phaseId,
@@ -284,9 +290,38 @@ export async function getQueueStatusLite(userId: string, phaseId: string) {
     select: { id: true },
   });
 
-  return fallbackMatch
-    ? { status: QueueStatus.MATCHED, matchId: fallbackMatch.id }
-    : { status: "NOT_QUEUED" as const, matchId: null };
+  if (fallbackMatch) {
+    return { status: QueueStatus.MATCHED, matchId: fallbackMatch.id };
+  }
+
+  if (activeRound) {
+    const currentRoundMatch = await prisma.match.findFirst({
+      where: {
+        phaseId,
+        roundNumber: activeRound.roundNumber,
+        players: { some: { userId } },
+        status: "CONFIRMED",
+        ratingAppliedAt: { not: null },
+      },
+      select: { id: true },
+    });
+
+    if (currentRoundMatch) {
+      const phase = await prisma.tournamentPhase.findUnique({
+        where: { id: phaseId },
+        select: { requiredMatchesPerPlayer: true },
+      });
+      const confirmedMatchesInPhase = await prisma.matchPlayer.count({
+        where: { userId, match: { phaseId, status: "CONFIRMED" } },
+      });
+
+      if (phase && confirmedMatchesInPhase > 0 && confirmedMatchesInPhase < phase.requiredMatchesPerPlayer) {
+        return { status: QueueStatus.WAITING, matchId: null };
+      }
+    }
+  }
+
+  return { status: "NOT_QUEUED" as const, matchId: null };
 }
 
 async function recentRelations(tx: DbClient, userIds: string[], phaseId: string) {

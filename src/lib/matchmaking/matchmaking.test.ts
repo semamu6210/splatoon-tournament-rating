@@ -5,7 +5,7 @@ import { calculateMatchingPower } from "@/lib/matchmaking/rating";
 import { selectEightPlayers } from "@/lib/matchmaking/selection";
 import { splitIntoBalancedTeams } from "@/lib/matchmaking/team";
 import type { WaitingPlayer } from "@/lib/matchmaking/types";
-import { checkAndAdvanceRound, getQueueStatus, joinQueue, joinQueueAndRunMatchmaking, leaveQueue, runMatchmaking } from "@/lib/matchmaking/service";
+import { checkAndAdvanceRound, getQueueStatus, getQueueStatusLite, joinQueue, joinQueueAndRunMatchmaking, leaveQueue, runMatchmaking } from "@/lib/matchmaking/service";
 import { prisma } from "@/lib/prisma";
 import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
 import {
@@ -631,6 +631,34 @@ describe("queue and matchmaking service", () => {
     await prisma.match.update({ where: { id: roundOneMatches[1].id }, data: { status: "CONFIRMED", ratingAppliedAt: new Date() } });
     await checkAndAdvanceRound(phase.id, 1);
     expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(2);
+  });
+
+  it("keeps lite queue status waiting after a synchronized round match is confirmed while other blocks continue", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(16);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 2 } });
+    await createBlocksForPlayers(phase.id, [
+      { name: "A", players: players.slice(0, 8) },
+      { name: "B", players: players.slice(8, 16) },
+    ]);
+
+    await runMatchmaking(phase.id);
+    const roundOneMatches = await prisma.match.findMany({
+      where: { phaseId: phase.id, roundNumber: 1 },
+      include: { players: true },
+      orderBy: { matchNumber: "asc" },
+    });
+    const firstBlockPlayerId = roundOneMatches[0].players[0].userId;
+
+    await prisma.match.update({
+      where: { id: roundOneMatches[0].id },
+      data: { status: "CONFIRMED", ratingAppliedAt: new Date() },
+    });
+    await checkAndAdvanceRound(phase.id, 1);
+
+    expect(await getQueueStatusLite(firstBlockPlayerId, phase.id)).toEqual({
+      status: "WAITING",
+      matchId: null,
+    });
   });
 
   it("does not complete a block round until its round matches are confirmed with rating applied", async () => {
