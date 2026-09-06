@@ -23,7 +23,7 @@ export async function POST(request: Request, context: Context) {
     const { phaseId } = await context.params;
     const body = await readJson<{ selectedTournamentParticipantIds?: string[] }>(request);
     const result = await confirmQualifierAdvancement(user.id, phaseId, body.selectedTournamentParticipantIds);
-    return ok(result);
+    return ok({ advancingIds: result.advancingIds, mainPhaseId: result.mainPhaseId });
   } catch (error) {
     return fail(error);
   }
