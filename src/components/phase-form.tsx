@@ -10,6 +10,7 @@ type PhaseFormProps = {
   phaseId?: string;
   mode: "create" | "edit";
   stages?: Array<{ id: string; name: string }>;
+  defaultSortOrder?: number;
   initial?: {
     phaseType: "QUALIFIER" | "MAIN_EVENT";
     requiredMatchesPerPlayer: number;
@@ -22,7 +23,7 @@ type PhaseFormProps = {
   };
 };
 
-export function PhaseForm({ tournamentId, phaseId, mode, initial, stages = [] }: PhaseFormProps) {
+export function PhaseForm({ tournamentId, phaseId, mode, initial, stages = [], defaultSortOrder = 1 }: PhaseFormProps) {
   const router = useRouter();
   const [phaseType, setPhaseType] = useState(initial?.phaseType ?? "QUALIFIER");
   const [requiredMatchesPerPlayer, setRequiredMatchesPerPlayer] = useState(String(initial?.requiredMatchesPerPlayer ?? 1));
@@ -31,7 +32,7 @@ export function PhaseForm({ tournamentId, phaseId, mode, initial, stages = [] }:
   const [rule, setRule] = useState(initial?.rule ?? "AREA");
   const [stageSelectionMode, setStageSelectionMode] = useState(initial?.stageSelectionMode ?? "RANDOM");
   const [defaultStageId, setDefaultStageId] = useState(initial?.defaultStageId ?? "");
-  const [sortOrder, setSortOrder] = useState(String(initial?.sortOrder ?? 1));
+  const [sortOrder, setSortOrder] = useState(String(initial?.sortOrder ?? defaultSortOrder));
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 

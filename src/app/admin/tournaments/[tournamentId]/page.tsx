@@ -336,7 +336,12 @@ export default async function AdminTournamentPage({ params }: PageProps) {
 
         <section className="rounded-md border border-zinc-300 bg-white p-4">
           <h2 className="mb-4 text-xl font-semibold">フェーズ作成</h2>
-          <PhaseForm mode="create" stages={tournament.stages} tournamentId={tournament.id} />
+          <PhaseForm
+            defaultSortOrder={(Math.max(0, ...tournament.phases.map((phase) => phase.sortOrder)) || 0) + 1}
+            mode="create"
+            stages={tournament.stages}
+            tournamentId={tournament.id}
+          />
         </section>
 
         <section className="rounded-md border border-zinc-300 bg-white p-4">

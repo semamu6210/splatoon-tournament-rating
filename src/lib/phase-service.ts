@@ -171,7 +171,21 @@ export async function createPhase(
     if (data.defaultStageId) {
       await requireUsableTournamentStage(tx, tournamentId, data.defaultStageId);
     }
-    const phase = await tx.tournamentPhase.create({ data: { tournamentId, status: "PENDING", ...data } });
+    const existingPhaseType = await tx.tournamentPhase.findUnique({
+      where: { tournamentId_phaseType: { tournamentId, phaseType: data.phaseType } },
+    });
+    if (existingPhaseType) {
+      throw new ApiError(409, "This phase type already exists.");
+    }
+    const existingSortOrders = await tx.tournamentPhase.findMany({
+      where: { tournamentId },
+      select: { sortOrder: true },
+    });
+    const usedSortOrders = new Set(existingSortOrders.map((phase) => phase.sortOrder));
+    const sortOrder = usedSortOrders.has(data.sortOrder)
+      ? Math.max(0, ...existingSortOrders.map((phase) => phase.sortOrder)) + 1
+      : data.sortOrder;
+    const phase = await tx.tournamentPhase.create({ data: { tournamentId, status: "PENDING", ...data, sortOrder } });
     await tx.adminActionLog.create({
       data: {
         adminUserId,

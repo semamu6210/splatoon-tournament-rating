@@ -474,6 +474,25 @@ describe("phase progression", () => {
     );
   });
 
+  it("creates a main event phase after a qualifier even when the submitted sort order is duplicated", async () => {
+    const { admin, tournament } = await createActiveTournament(8);
+    const qualifier = await createPhase(admin.id, tournament.id, {
+      phaseType: "QUALIFIER",
+      requiredMatchesPerPlayer: 2,
+      advancePlayerCount: 4,
+      sortOrder: 1,
+    });
+    const mainEvent = await createPhase(admin.id, tournament.id, {
+      phaseType: "MAIN_EVENT",
+      requiredMatchesPerPlayer: 1,
+      sortOrder: 1,
+    });
+
+    expect(qualifier.sortOrder).toBe(1);
+    expect(mainEvent.sortOrder).toBe(2);
+    expect(mainEvent.status).toBe("PENDING");
+  });
+
   it("finishes tournament and stores finalRank with tied ratings", async () => {
     const { admin, tournament, players } = await createActiveTournament(8);
     const mainEvent = await prisma.tournamentPhase.create({
