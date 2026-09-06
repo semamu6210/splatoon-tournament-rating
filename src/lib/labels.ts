@@ -56,8 +56,8 @@ export const teamLabel: Record<Team, string> = {
 
 export const weaponGroupLabel: Record<WeaponGroup, string> = {
   BACK: "後衛",
-  MID: "中衛",
-  FRONT: "前衛",
+  MID: "キル",
+  FRONT: "塗り",
 };
 
 export const userRoleLabel: Record<UserRole, string> = {

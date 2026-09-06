@@ -71,9 +71,9 @@ export function JoinForm({ tournamentId, initialParticipantName = "" }: JoinForm
           <option disabled value="">
             選択してください
           </option>
+          <option value="FRONT">塗り</option>
+          <option value="MID">キル</option>
           <option value="BACK">後衛</option>
-          <option value="MID">中衛</option>
-          <option value="FRONT">前衛</option>
         </select>
         <span className="text-xs text-zinc-600">同じグループに含まれるプレイヤーとミラーとしてマッチングします</span>
       </label>

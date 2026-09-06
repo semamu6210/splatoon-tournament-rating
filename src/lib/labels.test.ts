@@ -7,6 +7,7 @@ import {
   tournamentStatusLabel,
   userRoleLabel,
   voteTypeLabel,
+  weaponGroupLabel,
 } from "@/lib/labels";
 
 describe("Japanese labels", () => {
@@ -33,5 +34,11 @@ describe("Japanese labels", () => {
     expect(userRoleLabel.PLAYER).toBe("参加者");
     expect(userRoleLabel.ADMIN).toBe("管理者");
     expect(userRoleLabel.OWNER).toBe("オーナー");
+  });
+
+  it("maps weapon groups to role labels", () => {
+    expect(weaponGroupLabel.FRONT).toBe("塗り");
+    expect(weaponGroupLabel.MID).toBe("キル");
+    expect(weaponGroupLabel.BACK).toBe("後衛");
   });
 });
