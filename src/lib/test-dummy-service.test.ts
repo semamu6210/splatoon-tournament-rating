@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openResultReporting, startMatch, submitPlayerVotes, submitResultReport } from "@/lib/match-flow/service";
 import { checkAndAdvanceRound, joinQueue, runMatchmaking } from "@/lib/matchmaking/service";
+import { confirmQualifierAdvancement } from "@/lib/phase-service";
 import { prisma } from "@/lib/prisma";
 import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
 import { addTestDummies, fullyAutomateTestMatch, queueTestDummies, submitTestDummyVotes } from "@/lib/test-dummy-service";
@@ -323,6 +324,48 @@ describe("test dummies", () => {
     expect(new Set(votes.map((vote) => vote.voterUserId))).toHaveLength(8);
     expect(await prisma.ratingHistory.count({ where: { matchId: matchmaking.matchId } })).toBe(8);
     expect(await prisma.queueEntry.count({ where: { phaseId: phase.id, status: "WAITING" } })).toBe(0);
+  });
+
+  it("advances all completed dummies when qualifier advance count is unset", async () => {
+    const { admin, tournament } = await createConfiguredTournament(true);
+    await openRegistration(admin.id, tournament.id);
+    const dummies = await addTestDummies(admin.id, admin.role, tournament.id, { count: 8, areaXp: 2500 });
+    createdUserIds.push(...dummies.map((dummy) => dummy.userId));
+    await startTournament(admin.id, tournament.id);
+
+    const qualifier = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.ACTIVE,
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 1,
+      },
+    });
+    const mainEvent = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "MAIN_EVENT",
+        status: TournamentPhaseStatus.PENDING,
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 2,
+      },
+    });
+    await queueTestDummies(admin.id, admin.role, tournament.id);
+    const matchmaking = await runMatchmaking(qualifier.id);
+    expect(matchmaking.matched).toBe(true);
+    if (!matchmaking.matched) return;
+
+    await fullyAutomateTestMatch(admin.id, admin.role, matchmaking.matchId);
+    await prisma.tournamentPhase.update({
+      where: { id: qualifier.id },
+      data: { status: TournamentPhaseStatus.COMPLETED, completedAt: new Date() },
+    });
+
+    const result = await confirmQualifierAdvancement(admin.id, qualifier.id);
+
+    expect(result.advancingIds).toHaveLength(8);
+    expect(await prisma.tournamentPhaseParticipant.count({ where: { phaseId: mainEvent.id, isEligible: true } })).toBe(8);
   });
 
   it("runs synchronized rounds in a dummy tournament and waits for all four blocks", async () => {

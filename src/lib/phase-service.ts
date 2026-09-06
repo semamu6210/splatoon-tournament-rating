@@ -403,8 +403,9 @@ export async function getQualifierAdvancementPreview(phaseId: string) {
   if (ranking.phase.phaseType !== "QUALIFIER") throw new ApiError(400, "Phase must be QUALIFIER.");
 
   if (ranking.phase.advancementMode === "OVERALL") {
-    if (!ranking.phase.advancePlayerCount) throw new ApiError(400, "advancePlayerCount is required.");
-    return buildOverallAdvancementCandidates(ranking.rows, ranking.phase.advancePlayerCount);
+    const advancePlayerCount = ranking.phase.advancePlayerCount ?? ranking.rows.length;
+    if (advancePlayerCount <= 0) throw new ApiError(400, "advancePlayerCount is required.");
+    return buildOverallAdvancementCandidates(ranking.rows, advancePlayerCount);
   }
 
   const blocks = await prisma.tournamentBlock.findMany({
@@ -434,7 +435,7 @@ export async function getQualifierAdvancementPreview(phaseId: string) {
       return {
         blockId: block.id,
         blockName: block.name,
-        advancePlayerCount: block.advancePlayerCount,
+        advancePlayerCount: block.advancePlayerCount ?? participants.length,
         rows: assignCompetitionRanks(participants),
       };
     }),

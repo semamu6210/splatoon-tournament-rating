@@ -247,7 +247,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
   const advancementByPhaseId = new Map(
     await Promise.all(
       tournament.phases
-        .filter((phase) => phase.phaseType === "QUALIFIER" && phase.advancePlayerCount)
+        .filter((phase) => phase.phaseType === "QUALIFIER")
         .map(async (phase) => {
           try {
             return [phase.id, await getQualifierAdvancementPreview(phase.id)] as const;
