@@ -14,13 +14,14 @@ import { TournamentForm } from "@/components/tournament-form";
 import { TestDummyPanel } from "@/components/test-dummy-panel";
 import { auth } from "@/auth";
 import { canManage } from "@/lib/permissions";
+import { withPerf } from "@/lib/perf";
 import { prisma } from "@/lib/prisma";
 import { getTournamentOperationWarnings } from "@/lib/operations-monitor";
 import { getTournamentRankings } from "@/lib/ranking-service";
 import { getQualifierAdvancementPreview } from "@/lib/phase-service";
 import { serializeRatingConfig } from "@/lib/serializers";
 import { getTestDummyPhaseStatuses } from "@/lib/test-dummy-queue";
-import { advancementModeLabel, matchStatusLabel, tournamentPhaseStatusLabel, tournamentPhaseTypeLabel, tournamentStatusLabel } from "@/lib/labels";
+import { advancementModeLabel, matchStatusLabel, tournamentPhaseStatusLabel, tournamentPhaseTypeLabel, tournamentStatusLabel, weaponGroupLabel } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ function plainRankingRow(row: Awaited<ReturnType<typeof getTournamentRankings>>[
     losses: row.losses,
     matchesPlayed: row.matchesPlayed,
     areaXp: row.areaXp,
+    weaponGroup: row.weaponGroup,
     participantName: row.participantName,
     winningStreak: row.winningStreak,
     losingStreak: row.losingStreak,
@@ -118,6 +120,7 @@ function previewAutoLabels(preview: Awaited<ReturnType<typeof getQualifierAdvanc
 }
 
 export default async function AdminTournamentPage({ params }: PageProps) {
+  return withPerf("page-admin-tournament", async () => {
   const { tournamentId } = await params;
   const session = await auth();
   const allowed = session?.user ? canManage(session.user.role) : false;
@@ -499,6 +502,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                 <tr>
                   <th className="px-3 py-2">参加者</th>
                   <th className="px-3 py-2">XP</th>
+                  <th className="px-3 py-2">武器</th>
                   <th className="px-3 py-2">ブロック</th>
                   <th className="px-3 py-2">現在レート</th>
                   <th className="px-3 py-2">本戦</th>
@@ -527,6 +531,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                       </div>
                     </td>
                     <td className="px-3 py-2">{participant.areaXp}</td>
+                    <td className="px-3 py-2">{weaponGroupLabel[participant.weaponGroup]}</td>
                     <td className="px-3 py-2">{participant.blockName ?? "-"}</td>
                     <td className="px-3 py-2">{participant.rating?.toString() ?? "未初期化"}</td>
                     <td className="px-3 py-2">{participant.advancedToMainEvent ? "対象" : "-"}</td>
@@ -541,4 +546,5 @@ export default async function AdminTournamentPage({ params }: PageProps) {
       </section>
     </main>
   );
+  });
 }

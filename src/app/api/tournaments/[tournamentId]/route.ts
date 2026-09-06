@@ -54,6 +54,7 @@ export async function GET(_request: Request, context: Context) {
         losses: participant.losses,
         matchesPlayed: participant.matchesPlayed,
         areaXp: participant.areaXp,
+        weaponGroup: participant.weaponGroup,
         joinedAt: participant.joinedAt.toISOString(),
       })),
     });

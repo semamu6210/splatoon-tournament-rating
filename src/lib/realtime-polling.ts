@@ -26,7 +26,6 @@ export function matchStatusChanged(previous: MatchStatusLiteSnapshot, next: Matc
   return (
     previous.status !== next.status ||
     previous.winnerTeam !== next.winnerTeam ||
-    previous.submittedVoterCount !== next.submittedVoterCount ||
     previous.ratingAppliedAt !== next.ratingAppliedAt
   );
 }

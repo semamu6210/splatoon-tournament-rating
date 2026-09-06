@@ -2,9 +2,12 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 
+import { prismaQueryLoggingEnabled, recordPrismaQuery } from "@/lib/perf";
+
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
   prismaPgPool?: Pool;
+  prismaQueryListenerAttached?: boolean;
 };
 
 function getRuntimeDatabaseUrl() {
@@ -44,11 +47,22 @@ function getPrismaPgPool() {
 
 function createPrismaClient() {
   const adapter = new PrismaPg(getPrismaPgPool());
+  if (prismaQueryLoggingEnabled()) {
+    return new PrismaClient({ adapter, log: [{ emit: "event", level: "query" }] });
+  }
 
   return new PrismaClient({ adapter });
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+
+if (prismaQueryLoggingEnabled() && !globalForPrisma.prismaQueryListenerAttached) {
+  (prisma as unknown as { $on: (event: "query", callback: (event: { duration: number; query: string; params?: string; target?: string }) => void) => void }).$on(
+    "query",
+    recordPrismaQuery,
+  );
+  globalForPrisma.prismaQueryListenerAttached = true;
+}
 
 globalForPrisma.prisma = prisma;
 

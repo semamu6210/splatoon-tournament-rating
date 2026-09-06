@@ -29,14 +29,14 @@ describe("realtime polling fallback policy", () => {
     expect(isTerminalMatchStatus("VOTE_REPORTING")).toBe(false);
   });
 
-  it("refreshes match UI when status-lite observable fields change", () => {
+  it("refreshes match UI only when heavy observable fields change", () => {
     const previous = {
       status: "VOTE_REPORTING",
       winnerTeam: "A" as const,
       submittedVoterCount: 7,
       ratingAppliedAt: null,
     };
-    expect(matchStatusChanged(previous, { ...previous, submittedVoterCount: 8 })).toBe(true);
+    expect(matchStatusChanged(previous, { ...previous, submittedVoterCount: 8 })).toBe(false);
     expect(matchStatusChanged(previous, { ...previous, status: "CONFIRMED", ratingAppliedAt: "2026-08-23T00:00:00.000Z" })).toBe(true);
     expect(matchStatusChanged(previous, { ...previous })).toBe(false);
   });

@@ -1,4 +1,4 @@
-import { Prisma, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
+import { Prisma, XpMultiplierTarget, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
 
 import { ApiError } from "@/lib/http";
 import { buildXpTierRanges } from "@/lib/xp-tiers";
@@ -15,6 +15,7 @@ export type RatingConfigInput = {
   weakVotePoints: unknown;
   losingStreakPenalty: unknown;
   xpTierStepSize: unknown;
+  xpMultiplierTarget?: unknown;
   winningStreakBonusEnabled?: unknown;
   winningStreakBonusMultiplier?: unknown;
   winningStreakThreshold?: unknown;
@@ -31,6 +32,7 @@ export type NormalizedRatingConfigInput = {
   weakVotePoints: string;
   losingStreakPenalty: string;
   xpTierStepSize: 50 | 100;
+  xpMultiplierTarget: XpMultiplierTarget;
   winningStreakBonusEnabled: boolean;
   winningStreakBonusMultiplier: string;
   winningStreakThreshold: number;
@@ -56,6 +58,12 @@ function positiveInteger(value: unknown, field: string, defaultValue: number) {
     throw new ApiError(400, `${field} must be a positive integer.`);
   }
   return numberValue;
+}
+
+function xpMultiplierTargetValue(value: unknown) {
+  if (value === undefined || value === null || value === "") return XpMultiplierTarget.TOTAL_DELTA;
+  if (value === XpMultiplierTarget.TOTAL_DELTA || value === XpMultiplierTarget.VOTE_POINTS_ONLY) return value;
+  throw new ApiError(400, "xpMultiplierTarget is invalid.");
 }
 
 type MultiplierInput = {
@@ -113,6 +121,7 @@ export function normalizeRatingConfigInput(input: RatingConfigInput): Normalized
     weakVotePoints: nonNegativeDecimalString(input.weakVotePoints, "weakVotePoints"),
     losingStreakPenalty: nonNegativeDecimalString(input.losingStreakPenalty, "losingStreakPenalty"),
     xpTierStepSize,
+    xpMultiplierTarget: xpMultiplierTargetValue(input.xpMultiplierTarget),
     winningStreakBonusEnabled: booleanValue(input.winningStreakBonusEnabled),
     winningStreakBonusMultiplier: positiveDecimalString(input.winningStreakBonusMultiplier ?? "1.2", "winningStreakBonusMultiplier"),
     winningStreakThreshold: positiveInteger(input.winningStreakThreshold, "winningStreakThreshold", 3),
@@ -148,6 +157,9 @@ export function validateCompleteRatingConfig(
 
   if (config.xpTierStepSize !== 50 && config.xpTierStepSize !== 100) {
     throw new ApiError(400, "xpTierStepSize is invalid.");
+  }
+  if (config.xpMultiplierTarget !== XpMultiplierTarget.TOTAL_DELTA && config.xpMultiplierTarget !== XpMultiplierTarget.VOTE_POINTS_ONLY) {
+    throw new ApiError(400, "xpMultiplierTarget is invalid.");
   }
   if (new Prisma.Decimal(config.winningStreakBonusMultiplier).lte(0)) {
     throw new ApiError(400, "winningStreakBonusMultiplier is invalid.");
@@ -206,6 +218,7 @@ export function configSnapshot(
     weakVotePoints: config.weakVotePoints.toString(),
     losingStreakPenalty: config.losingStreakPenalty.toString(),
     xpTierStepSize: config.xpTierStepSize,
+    xpMultiplierTarget: config.xpMultiplierTarget,
     winningStreakBonusEnabled: config.winningStreakBonusEnabled,
     winningStreakBonusMultiplier: config.winningStreakBonusMultiplier.toString(),
     winningStreakThreshold: config.winningStreakThreshold,

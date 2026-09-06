@@ -1,4 +1,4 @@
-import { Prisma, UserRole } from "@prisma/client";
+import { Prisma, UserRole, WeaponGroup } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import { serializeParticipant } from "@/lib/serializers";
@@ -10,6 +10,7 @@ describe("serializeParticipant", () => {
       tournamentId: "tournament-id",
       userId: "user-id",
       areaXp: 2500,
+      weaponGroup: WeaponGroup.MID,
       rating: new Prisma.Decimal("1450"),
       ratingInitializedAt: null,
       initialRatingConfigId: null,

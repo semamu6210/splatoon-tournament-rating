@@ -1,7 +1,41 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, WeaponGroup, type TournamentBlock, type TournamentParticipant } from "@prisma/client";
 
 import { ApiError } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+
+const weaponGroupOrder: WeaponGroup[] = [WeaponGroup.BACK, WeaponGroup.MID, WeaponGroup.FRONT];
+
+function autoBlockAssignments(params: {
+  phaseId: string;
+  blocks: TournamentBlock[];
+  participants: TournamentParticipant[];
+}) {
+  const blockLoads = new Map(params.blocks.map((block) => [block.id, 0]));
+  const weaponGroupLoads = new Map(params.blocks.map((block) => [block.id, new Map(weaponGroupOrder.map((group) => [group, 0]))]));
+  const assignments: Array<{ phaseId: string; blockId: string; tournamentParticipantId: string }> = [];
+  const byWeaponGroup = new Map(weaponGroupOrder.map((group) => [group, [] as TournamentParticipant[]]));
+
+  for (const participant of params.participants) {
+    byWeaponGroup.get(participant.weaponGroup)?.push(participant);
+  }
+
+  for (const group of weaponGroupOrder) {
+    for (const participant of byWeaponGroup.get(group) ?? []) {
+      const block = [...params.blocks].sort((left, right) => {
+        const groupDiff = (weaponGroupLoads.get(left.id)?.get(group) ?? 0) - (weaponGroupLoads.get(right.id)?.get(group) ?? 0);
+        if (groupDiff !== 0) return groupDiff;
+        const totalDiff = (blockLoads.get(left.id) ?? 0) - (blockLoads.get(right.id) ?? 0);
+        if (totalDiff !== 0) return totalDiff;
+        return left.sortOrder - right.sortOrder;
+      })[0];
+      assignments.push({ phaseId: params.phaseId, blockId: block.id, tournamentParticipantId: participant.id });
+      blockLoads.set(block.id, (blockLoads.get(block.id) ?? 0) + 1);
+      weaponGroupLoads.get(block.id)?.set(group, (weaponGroupLoads.get(block.id)?.get(group) ?? 0) + 1);
+    }
+  }
+
+  return assignments;
+}
 
 function parseBlockInputs(input: unknown) {
   if (Array.isArray(input)) {
@@ -87,10 +121,7 @@ export async function autoAssignPhaseBlocks(phaseId: string, adminUserId?: strin
 
       await tx.tournamentBlockParticipant.deleteMany({ where: { phaseId } });
       await tx.tournamentBlockParticipant.createMany({
-        data: participants.map((participant, index) => {
-          const block = blocks[index % blocks.length];
-          return { phaseId, blockId: block.id, tournamentParticipantId: participant.id };
-        }),
+        data: autoBlockAssignments({ phaseId, blocks, participants }),
       });
       if (adminUserId) {
         await tx.adminActionLog.create({

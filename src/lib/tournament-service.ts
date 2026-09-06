@@ -10,7 +10,7 @@ import {
 } from "@/lib/rating-config";
 import { prisma } from "@/lib/prisma";
 import { normalizeStageNames, normalizeStagePoolEnabled, syncTournamentStagePool } from "@/lib/stage-service";
-import { areaXpValue, optionalDate, participantNameValue, requiredString } from "@/lib/validation";
+import { areaXpValue, optionalDate, participantNameValue, requiredString, weaponGroupValue } from "@/lib/validation";
 
 export type TournamentInput = {
   name: unknown;
@@ -294,6 +294,7 @@ export async function createRatingConfigVersion(
         weakVotePoints: normalized.weakVotePoints,
         losingStreakPenalty: normalized.losingStreakPenalty,
         xpTierStepSize: normalized.xpTierStepSize,
+        xpMultiplierTarget: normalized.xpMultiplierTarget,
         winningStreakBonusEnabled: normalized.winningStreakBonusEnabled,
         winningStreakBonusMultiplier: normalized.winningStreakBonusMultiplier,
         winningStreakThreshold: normalized.winningStreakThreshold,
@@ -330,9 +331,10 @@ export async function createRatingConfigVersion(
   });
 }
 
-export async function joinTournament(userId: string, tournamentId: string, input: { areaXp: unknown; participantName: unknown }) {
+export async function joinTournament(userId: string, tournamentId: string, input: { areaXp: unknown; participantName: unknown; weaponGroup?: unknown }) {
   const areaXp = areaXpValue(input.areaXp);
   const participantName = participantNameValue(input.participantName);
+  const weaponGroup = weaponGroupValue(input.weaponGroup);
 
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: userId } });
@@ -360,6 +362,7 @@ export async function joinTournament(userId: string, tournamentId: string, input
         where: { id: existing.id },
         data: {
           areaXp,
+          weaponGroup,
           participantName,
           rating: null,
           ratingInitializedAt: null,
@@ -376,6 +379,7 @@ export async function joinTournament(userId: string, tournamentId: string, input
         userId,
         participantName,
         areaXp,
+        weaponGroup,
         rating: null,
         ratingInitializedAt: null,
       },

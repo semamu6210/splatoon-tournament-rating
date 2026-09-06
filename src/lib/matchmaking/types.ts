@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, WeaponGroup } from "@prisma/client";
 
 export type WaitingPlayer = {
   queueEntryId: string;
@@ -7,6 +7,7 @@ export type WaitingPlayer = {
   rating: Prisma.Decimal;
   losingStreak: number;
   areaXp: number;
+  weaponGroup: WeaponGroup;
   isDummy: boolean;
   completedMatchesInPhase: number;
   recentOpponentIds: Set<string>;
@@ -22,5 +23,6 @@ export type TeamAssignment = {
   teamB: MatchmakingPlayer[];
   matchingPowerDifference: Prisma.Decimal;
   averageXpDifference: number;
+  weaponGroupMirrorPenalty: number;
   teammateRepeatPenalty: number;
 };

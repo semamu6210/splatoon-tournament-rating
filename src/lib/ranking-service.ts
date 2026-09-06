@@ -1,4 +1,4 @@
-import { Prisma, type TournamentParticipant, type TournamentPhaseType, type User } from "@prisma/client";
+import { Prisma, type TournamentParticipant, type TournamentPhaseType, type User, type WeaponGroup } from "@prisma/client";
 
 import { formatRating } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
@@ -18,6 +18,7 @@ export type RankingRow = {
   losses: number;
   matchesPlayed: number;
   areaXp: number;
+  weaponGroup: WeaponGroup;
   participantName: string;
   isDummy: boolean;
   winningStreak: number;
@@ -105,6 +106,7 @@ export function assignCompetitionRanks(participants: RankedParticipant[]): Ranki
       losses: participant.losses,
       matchesPlayed: participant.matchesPlayed,
       areaXp: participant.areaXp,
+      weaponGroup: participant.weaponGroup,
       participantName: participant.participantName,
       isDummy: participant.isDummy,
       winningStreak: participant.winningStreak,

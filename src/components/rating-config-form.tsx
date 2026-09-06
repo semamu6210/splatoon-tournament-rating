@@ -15,6 +15,7 @@ type RatingConfigFormProps = {
     weakVotePoints: string;
     losingStreakPenalty: string;
     xpTierStepSize: number;
+    xpMultiplierTarget?: "TOTAL_DELTA" | "VOTE_POINTS_ONLY";
     winningStreakBonusEnabled: boolean;
     winningStreakBonusMultiplier: string;
     winningStreakThreshold: number;
@@ -66,6 +67,7 @@ export function RatingConfigForm({ tournamentId, current }: RatingConfigFormProp
       weakVotePoints: form.get("weakVotePoints"),
       losingStreakPenalty: form.get("losingStreakPenalty"),
       xpTierStepSize: stepSize,
+      xpMultiplierTarget: form.get("xpMultiplierTarget"),
       winningStreakBonusEnabled: form.get("winningStreakBonusEnabled") === "on",
       winningStreakBonusMultiplier: form.get("winningStreakBonusMultiplier"),
       winningStreakThreshold: Number(form.get("winningStreakThreshold") ?? 3),
@@ -131,6 +133,17 @@ export function RatingConfigForm({ tournamentId, current }: RatingConfigFormProp
           >
             <option value={100}>100</option>
             <option value={50}>50</option>
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm">
+          XP倍率の対象
+          <select
+            className="rounded-md border border-zinc-300 px-3 py-2"
+            defaultValue={current?.xpMultiplierTarget ?? "TOTAL_DELTA"}
+            name="xpMultiplierTarget"
+          >
+            <option value="TOTAL_DELTA">レート変動値全体</option>
+            <option value="VOTE_POINTS_ONLY">投票によるレート変動値のみ</option>
           </select>
         </label>
       </div>

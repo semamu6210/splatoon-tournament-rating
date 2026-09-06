@@ -69,6 +69,7 @@ function canOperateAsHostOrAdmin(match: { roomHostUserId: string | null }, userI
 export async function startMatch(matchId: string) {
   return prisma.$transaction(async (tx) => {
     const match = await getMatchWithPlayers(tx, matchId);
+    if (match.status === "PLAYING") return match;
     if (match.status !== "CREATED") throw new ApiError(400, "Only CREATED matches can start.");
     validateMatchPlayers(match.players);
     const tournament = await tx.tournament.findUnique({ where: { id: match.tournamentId } });

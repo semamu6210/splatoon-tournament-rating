@@ -1,3 +1,5 @@
+import { WeaponGroup } from "@prisma/client";
+
 import { ApiError } from "@/lib/http";
 
 export function requiredString(value: unknown, field: string, maxLength = 120) {
@@ -99,4 +101,15 @@ export function participantNameValue(value: unknown) {
   }
 
   return text;
+}
+
+export function weaponGroupValue(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return WeaponGroup.MID;
+  }
+  if (value === WeaponGroup.BACK || value === WeaponGroup.MID || value === WeaponGroup.FRONT) {
+    return value;
+  }
+
+  throw new ApiError(400, "weaponGroup is required.");
 }

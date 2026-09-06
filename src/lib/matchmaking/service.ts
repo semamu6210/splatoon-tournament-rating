@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/http";
 import { selectEightPlayers } from "@/lib/matchmaking/selection";
 import { splitIntoBalancedTeams } from "@/lib/matchmaking/team";
 import type { MatchmakingPlayer, WaitingPlayer } from "@/lib/matchmaking/types";
+import { perfSegment } from "@/lib/perf";
 import { prisma } from "@/lib/prisma";
 import { validateCompleteRatingConfig } from "@/lib/rating-config";
 import { touchQueueStatusEventTx, touchQueueStatusEventsTx } from "@/lib/realtime-status-events";
@@ -348,30 +349,31 @@ async function getWaitingPlayers(tx: DbClient, phase: { id: string; tournamentId
   });
 
   const userIds = entries.map((entry) => entry.userId);
-  const relations = await recentRelations(tx, userIds, phase.id);
-  const confirmedCounts = await tx.matchPlayer.groupBy({
+  const relations = await perfSegment("matchmaking.rematchHistory", "db", () => recentRelations(tx, userIds, phase.id));
+  const confirmedCounts = await perfSegment("matchmaking.confirmedCounts", "db", () => tx.matchPlayer.groupBy({
     by: ["userId"],
     where: { userId: { in: userIds }, match: { phaseId: phase.id, status: "CONFIRMED" } },
     _count: { userId: true },
-  });
+  }));
   const confirmedCountByUserId = new Map(confirmedCounts.map((count) => [count.userId, count._count.userId]));
-  const openPlayers = await tx.matchPlayer.findMany({
+  const openPlayers = await perfSegment("matchmaking.unfinishedMatches", "db", () => tx.matchPlayer.findMany({
     where: {
       userId: { in: userIds },
       match: { phaseId: phase.id, status: { in: [...ACTIVE_MATCH_STATUSES] } },
     },
     select: { userId: true },
-  });
+  }));
   const openUserIds = new Set(openPlayers.map((player) => player.userId));
-  const phaseRelations = await tx.tournamentPhaseParticipant.findMany({
+  const phaseRelations = await perfSegment("matchmaking.phaseEligibility", "db", () => tx.tournamentPhaseParticipant.findMany({
     where: { phaseId: phase.id, tournamentParticipant: { userId: { in: userIds } } },
     select: { isEligible: true, tournamentParticipant: { select: { userId: true } } },
-  });
+  }));
   const hasPhaseRelations = phaseRelations.length > 0;
   const phaseEligibleByUserId = new Map(phaseRelations.map((relation) => [relation.tournamentParticipant.userId, relation.isEligible]));
   const players: WaitingPlayer[] = [];
   const summary = emptyExclusionSummary(entries.length);
 
+  await perfSegment("matchmaking.eligibleSelection", "calculation", () => {
   for (const entry of entries) {
     const participant = entry.user.participants.find((item) => item.tournamentId === phase.tournamentId);
 
@@ -414,12 +416,14 @@ async function getWaitingPlayers(tx: DbClient, phase: { id: string; tournamentId
       rating: participant.rating,
       losingStreak: participant.losingStreak,
       areaXp: participant.areaXp,
+      weaponGroup: participant.weaponGroup,
       isDummy: participant.isDummy,
       completedMatchesInPhase,
       recentOpponentIds: relation?.opponents ?? new Set(),
       recentTeammateIds: relation?.teammates ?? new Set(),
     });
   }
+  });
 
   summary.eligible = players.length;
   return { players, summary };
@@ -509,7 +513,7 @@ async function createMatchForSelectedPlayers(params: {
   queueEntryIds?: string[];
 }) {
   validateEightPlayers(params.selected);
-  const teams = splitIntoBalancedTeams(params.selected);
+  const teams = await perfSegment("matchmaking.teamOptimization", "calculation", () => splitIntoBalancedTeams(params.selected));
 
   if (teams.teamA.length !== 4 || teams.teamB.length !== 4) {
     throw new ApiError(500, "Team assignment must be 4v4.");
@@ -546,6 +550,7 @@ async function createMatchForSelectedPlayers(params: {
         ratingBefore: player.rating,
         matchingRatingAtMatch: player.matchingPower,
         areaXpAtMatch: player.areaXp,
+        weaponGroupAtMatch: player.weaponGroup,
         losingStreakAtMatch: player.losingStreak,
         ratingAfter: null,
       })),
@@ -556,6 +561,7 @@ async function createMatchForSelectedPlayers(params: {
         ratingBefore: player.rating,
         matchingRatingAtMatch: player.matchingPower,
         areaXpAtMatch: player.areaXp,
+        weaponGroupAtMatch: player.weaponGroup,
         losingStreakAtMatch: player.losingStreak,
         ratingAfter: null,
       })),
@@ -757,6 +763,7 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
         rating: participant.rating!,
         losingStreak: participant.losingStreak,
         areaXp: participant.areaXp,
+        weaponGroup: participant.weaponGroup,
         isDummy: participant.isDummy,
         completedMatchesInPhase: completedByUserId.get(participant.userId) ?? 0,
         recentOpponentIds: new Set(),
@@ -842,8 +849,8 @@ export async function runMatchmaking(phaseId: string) {
       return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
     }
 
-    const waitingPlayers = await getWaitingPlayers(prisma, preflightPhase);
-    const selected = selectEightPlayers(waitingPlayers.players);
+    const waitingPlayers = await perfSegment("matchmaking.waitingPlayers", "db", () => getWaitingPlayers(prisma, preflightPhase));
+    const selected = await perfSegment("matchmaking.selectEight", "calculation", () => selectEightPlayers(waitingPlayers.players));
 
     if (!selected) {
       if (waitingPlayers.summary.waiting >= 8 && waitingPlayers.summary.eligible === 0) {
@@ -856,7 +863,7 @@ export async function runMatchmaking(phaseId: string) {
       return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
     }
 
-    return prisma.$transaction(
+    return perfSegment("matchmaking.transaction", "db", () => prisma.$transaction(
       async (tx) => {
         const phase = await tx.tournamentPhase.findUnique({
           where: { id: phaseId },
@@ -897,10 +904,10 @@ export async function runMatchmaking(phaseId: string) {
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 5000, timeout: 15000 },
-    );
+    ));
   }
 
-  return prisma.$transaction(
+  return perfSegment("matchmaking.transaction", "db", () => prisma.$transaction(
     async (tx) => {
       const phase = await tx.tournamentPhase.findUnique({
         where: { id: phaseId },
@@ -937,8 +944,8 @@ export async function runMatchmaking(phaseId: string) {
         return { matched: false as const, reason: "NOT_ENOUGH_PLAYERS" as const };
       }
 
-      const waitingPlayers = await getWaitingPlayers(tx, phase);
-      const selected = selectEightPlayers(waitingPlayers.players);
+      const waitingPlayers = await perfSegment("matchmaking.waitingPlayers", "db", () => getWaitingPlayers(tx, phase));
+      const selected = await perfSegment("matchmaking.selectEight", "calculation", () => selectEightPlayers(waitingPlayers.players));
 
       if (!selected) {
         if (waitingPlayers.summary.waiting >= 8 && waitingPlayers.summary.eligible === 0) {
@@ -978,7 +985,7 @@ export async function runMatchmaking(phaseId: string) {
       };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 5000, timeout: 15000 },
-  );
+  ));
 }
 
 async function allPhaseTargetsReachedRequiredMatches(tx: Tx, phase: { id: string; tournamentId: string; requiredMatchesPerPlayer: number }) {

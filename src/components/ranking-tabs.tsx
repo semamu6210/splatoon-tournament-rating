@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { PlayerAvatar } from "@/components/player-avatar";
-import { tournamentPhaseTypeLabel } from "@/lib/labels";
+import { tournamentPhaseTypeLabel, weaponGroupLabel } from "@/lib/labels";
 
 type RankingRow = {
   rank: number;
@@ -16,6 +16,7 @@ type RankingRow = {
   losses: number;
   matchesPlayed: number;
   areaXp: number;
+  weaponGroup: keyof typeof weaponGroupLabel;
   participantName: string;
   isDummy: boolean;
   winningStreak: number;
@@ -108,6 +109,7 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
                   : row.matchesPlayed}
               </p>
               <p>XP {row.areaXp}</p>
+              <p>武器 {weaponGroupLabel[row.weaponGroup]}</p>
               <p>本戦 {row.advancedToMainEvent ? "対象" : "-"}</p>
               {showFinalRank && <p>最終順位 {row.finalRank ?? "-"}</p>}
             </div>
@@ -125,6 +127,7 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
               <th className="px-3 py-2">勝敗</th>
               <th className="px-3 py-2">試合</th>
               <th className="px-3 py-2">XP</th>
+              <th className="px-3 py-2">武器</th>
               <th className="px-3 py-2">本戦</th>
               {showFinalRank && <th className="px-3 py-2">最終順位</th>}
             </tr>
@@ -156,6 +159,7 @@ export function RankingTabs({ overall, blocks, showFinalRank = false }: RankingT
                     : row.matchesPlayed}
                 </td>
                 <td className="px-3 py-2">{row.areaXp}</td>
+                <td className="px-3 py-2">{weaponGroupLabel[row.weaponGroup]}</td>
                 <td className="px-3 py-2">{row.advancedToMainEvent ? "対象" : "-"}</td>
                 {showFinalRank && <td className="px-3 py-2">{row.finalRank ?? "-"}</td>}
               </tr>

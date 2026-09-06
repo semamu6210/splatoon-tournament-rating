@@ -2,10 +2,12 @@ import Link from "next/link";
 
 import { checkDatabaseConnection } from "@/lib/prisma";
 import { AuthControls } from "@/components/auth-controls";
+import { withPerf } from "@/lib/perf";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  return withPerf("page-home", async () => {
   const db = await checkDatabaseConnection();
 
   return (
@@ -62,4 +64,5 @@ export default async function HomePage() {
       </section>
     </main>
   );
+  });
 }

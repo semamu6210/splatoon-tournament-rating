@@ -34,6 +34,7 @@ export function serializeRatingConfig(
     strongVotePoints: serializeRequiredDecimal(config.strongVotePoints),
     weakVotePoints: serializeRequiredDecimal(config.weakVotePoints),
     losingStreakPenalty: serializeRequiredDecimal(config.losingStreakPenalty),
+    xpMultiplierTarget: config.xpMultiplierTarget,
     winningStreakBonusMultiplier: serializeRequiredDecimal(config.winningStreakBonusMultiplier),
     voteCountBonusMultiplier: serializeRequiredDecimal(config.voteCountBonusMultiplier),
     createdAt: config.createdAt.toISOString(),
@@ -61,6 +62,7 @@ export function serializeParticipant(
   return {
     ...rest,
     rating: serializeDecimal(participant.rating),
+    weaponGroup: participant.weaponGroup,
     ratingInitializedAt: participant.ratingInitializedAt?.toISOString() ?? null,
     joinedAt: participant.joinedAt.toISOString(),
     createdAt: participant.createdAt.toISOString(),

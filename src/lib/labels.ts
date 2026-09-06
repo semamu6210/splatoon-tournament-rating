@@ -7,6 +7,7 @@ import type {
   TournamentStatus,
   UserRole,
   VoteType,
+  WeaponGroup,
 } from "@prisma/client";
 
 export const tournamentStatusLabel: Record<TournamentStatus, string> = {
@@ -51,6 +52,12 @@ export const voteTypeLabel: Record<VoteType, string> = {
 export const teamLabel: Record<Team, string> = {
   A: "チームA",
   B: "チームB",
+};
+
+export const weaponGroupLabel: Record<WeaponGroup, string> = {
+  BACK: "後衛",
+  MID: "中衛",
+  FRONT: "前衛",
 };
 
 export const userRoleLabel: Record<UserRole, string> = {

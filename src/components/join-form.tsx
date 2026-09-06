@@ -21,11 +21,12 @@ export function JoinForm({ tournamentId, initialParticipantName = "" }: JoinForm
     const form = new FormData(event.currentTarget);
     const areaXp = Number(form.get("areaXp"));
     const participantName = String(form.get("participantName") ?? "");
+    const weaponGroup = String(form.get("weaponGroup") ?? "");
 
     const response = await fetch(`/api/tournaments/${tournamentId}/join`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ areaXp, participantName }),
+      body: JSON.stringify({ areaXp, participantName, weaponGroup }),
     });
     const json = (await response.json().catch(() => null)) as { error?: string } | null;
 
@@ -63,6 +64,18 @@ export function JoinForm({ tournamentId, initialParticipantName = "" }: JoinForm
           step={1}
           type="number"
         />
+      </label>
+      <label className="grid gap-1 text-sm">
+        武器グループ
+        <select className="rounded-md border border-zinc-300 px-3 py-2" defaultValue="" name="weaponGroup" required>
+          <option disabled value="">
+            選択してください
+          </option>
+          <option value="BACK">後衛</option>
+          <option value="MID">中衛</option>
+          <option value="FRONT">前衛</option>
+        </select>
+        <span className="text-xs text-zinc-600">同じグループに含まれるプレイヤーとミラーとしてマッチングします</span>
       </label>
       <button className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-zinc-400" disabled={pending}>
         {pending ? "登録中..." : "参加登録"}

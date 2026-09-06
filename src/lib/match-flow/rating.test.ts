@@ -1,4 +1,4 @@
-import { Prisma, type MatchPlayer, type PlayerVote, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
+import { Prisma, WeaponGroup, XpMultiplierTarget, type MatchPlayer, type PlayerVote, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import { calculatePlayerRatingResults } from "@/lib/match-flow/rating";
@@ -14,6 +14,7 @@ function config(overrides: Partial<TournamentRatingConfig> = {}): TournamentRati
     weakVotePoints: new Prisma.Decimal(5),
     losingStreakPenalty: new Prisma.Decimal(20),
     xpTierStepSize: 100,
+    xpMultiplierTarget: XpMultiplierTarget.TOTAL_DELTA,
     winningStreakBonusEnabled: false,
     winningStreakBonusMultiplier: new Prisma.Decimal("1.2"),
     winningStreakThreshold: 3,
@@ -36,6 +37,7 @@ function player(userId: string, team: "A" | "B"): MatchPlayer {
     ratingBefore: new Prisma.Decimal(1000),
     matchingRatingAtMatch: new Prisma.Decimal(0),
     areaXpAtMatch: 2500,
+    weaponGroupAtMatch: WeaponGroup.MID,
     losingStreakAtMatch: 0,
     ratingAfter: null,
   };
@@ -161,5 +163,19 @@ describe("rating bonus modes", () => {
     expect(result.finalDelta.equals("45.36")).toBe(true);
     expect(result.ratingAfter.equals("1045.36")).toBe(true);
     expect(result.finalDelta.gte(0)).toBe(true);
+  });
+
+  it("can apply XP multipliers only to vote points before flat win bonus", () => {
+    const result = resultForTarget({
+      config: config({ xpMultiplierTarget: XpMultiplierTarget.VOTE_POINTS_ONLY }),
+      xpMultiplier: "0.5",
+      votes: [vote("v1", "target", "STRONG"), vote("v2", "target", "WEAK")],
+    });
+
+    expect(result.votePoints.equals("15")).toBe(true);
+    expect(result.winBonusUsed.equals("10")).toBe(true);
+    expect(result.baseDelta.equals("25")).toBe(true);
+    expect(result.finalDelta.equals("17.5")).toBe(true);
+    expect(result.ratingAfter.equals("1017.5")).toBe(true);
   });
 });

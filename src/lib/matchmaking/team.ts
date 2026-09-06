@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, WeaponGroup } from "@prisma/client";
 
 import type { MatchmakingPlayer, TeamAssignment } from "@/lib/matchmaking/types";
 
@@ -30,6 +30,14 @@ function averageXp(players: MatchmakingPlayer[]) {
   return players.reduce((sum, player) => sum + player.areaXp, 0) / players.length;
 }
 
+function weaponGroupMirrorPenalty(teamA: MatchmakingPlayer[], teamB: MatchmakingPlayer[]) {
+  return [WeaponGroup.BACK, WeaponGroup.MID, WeaponGroup.FRONT].reduce((penalty, group) => {
+    const teamACount = teamA.filter((player) => player.weaponGroup === group).length;
+    const teamBCount = teamB.filter((player) => player.weaponGroup === group).length;
+    return penalty + Math.abs(teamACount - teamBCount);
+  }, 0);
+}
+
 function teammateRepeatPenalty(team: MatchmakingPlayer[]) {
   let penalty = 0;
 
@@ -53,6 +61,7 @@ function fallbackSplit(players: MatchmakingPlayer[]): TeamAssignment {
     teamB,
     matchingPowerDifference: sumMatchingPower(teamA).sub(sumMatchingPower(teamB)).abs(),
     averageXpDifference: Math.abs(averageXp(teamA) - averageXp(teamB)),
+    weaponGroupMirrorPenalty: weaponGroupMirrorPenalty(teamA, teamB),
     teammateRepeatPenalty: teammateRepeatPenalty(teamA) + teammateRepeatPenalty(teamB),
   };
 }
@@ -76,20 +85,24 @@ export function splitIntoBalancedTeams(players: MatchmakingPlayer[]): TeamAssign
     const teamB = players.filter((player) => !teamAIds.has(player.userId));
     const matchingPowerDifference = sumMatchingPower(teamA).sub(sumMatchingPower(teamB)).abs();
     const averageXpDifference = Math.abs(averageXp(teamA) - averageXp(teamB));
+    const mirrorPenalty = weaponGroupMirrorPenalty(teamA, teamB);
     const repeatPenalty = teammateRepeatPenalty(teamA) + teammateRepeatPenalty(teamB);
 
     if (
       !best ||
-      matchingPowerDifference.lt(best.matchingPowerDifference) ||
-      (matchingPowerDifference.equals(best.matchingPowerDifference) &&
-        (averageXpDifference < best.averageXpDifference ||
-          (averageXpDifference === best.averageXpDifference && repeatPenalty < best.teammateRepeatPenalty)))
+      mirrorPenalty < best.weaponGroupMirrorPenalty ||
+      (mirrorPenalty === best.weaponGroupMirrorPenalty &&
+        (matchingPowerDifference.lt(best.matchingPowerDifference) ||
+          (matchingPowerDifference.equals(best.matchingPowerDifference) &&
+            (averageXpDifference < best.averageXpDifference ||
+              (averageXpDifference === best.averageXpDifference && repeatPenalty < best.teammateRepeatPenalty)))))
     ) {
       best = {
         teamA,
         teamB,
         matchingPowerDifference,
         averageXpDifference,
+        weaponGroupMirrorPenalty: mirrorPenalty,
         teammateRepeatPenalty: repeatPenalty,
       };
     }

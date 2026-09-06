@@ -1,4 +1,4 @@
-import { Prisma, TournamentPhaseStatus, UserRole } from "@prisma/client";
+import { Prisma, TournamentPhaseStatus, UserRole, WeaponGroup } from "@prisma/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { autoAssignPhaseBlocks, createPhaseBlocks, moveParticipantToBlock } from "@/lib/block-service";
@@ -104,6 +104,7 @@ describe("competition rankings", () => {
       tournamentId: "tournament",
       participantName: "participant",
       areaXp: 2500,
+      weaponGroup: WeaponGroup.MID,
       ratingInitializedAt: new Date(),
       initialRatingConfigId: null,
       initialRatingConfigVersion: null,
@@ -291,6 +292,52 @@ describe("phase progression", () => {
     expect(memberships).toHaveLength(1);
     expect(rankings.blocks).toHaveLength(2);
     expect(rankings.blocks.every((block) => block.rows.every((row) => row.rank >= 1))).toBe(true);
+  });
+
+  it("balances weapon groups across blocks during auto assignment", async () => {
+    const { tournament } = await createActiveTournament(12);
+    const qualifier = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.PENDING,
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 1,
+      },
+    });
+    const participants = await prisma.tournamentParticipant.findMany({
+      where: { tournamentId: tournament.id },
+      orderBy: { joinedAt: "asc" },
+    });
+    const groups = [
+      ...Array.from({ length: 4 }, () => WeaponGroup.BACK),
+      ...Array.from({ length: 4 }, () => WeaponGroup.MID),
+      ...Array.from({ length: 4 }, () => WeaponGroup.FRONT),
+    ];
+    for (let index = 0; index < participants.length; index += 1) {
+      await prisma.tournamentParticipant.update({
+        where: { id: participants[index].id },
+        data: { weaponGroup: groups[index] },
+      });
+    }
+
+    const blocks = await createPhaseBlocks(qualifier.id, ["Block A", "Block B"]);
+    await autoAssignPhaseBlocks(qualifier.id);
+    const assignedBlocks = await prisma.tournamentBlock.findMany({
+      where: { id: { in: blocks.map((block) => block.id) } },
+      include: { participants: { include: { tournamentParticipant: true } } },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    for (const block of assignedBlocks) {
+      const counts = new Map<WeaponGroup, number>();
+      for (const item of block.participants) {
+        counts.set(item.tournamentParticipant.weaponGroup, (counts.get(item.tournamentParticipant.weaponGroup) ?? 0) + 1);
+      }
+      expect(counts.get(WeaponGroup.BACK)).toBe(2);
+      expect(counts.get(WeaponGroup.MID)).toBe(2);
+      expect(counts.get(WeaponGroup.FRONT)).toBe(2);
+    }
   });
 
   it("filters rankings by rankingVisibility for non-admin viewers", async () => {

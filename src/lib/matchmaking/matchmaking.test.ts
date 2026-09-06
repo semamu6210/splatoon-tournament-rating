@@ -1,4 +1,4 @@
-import { Prisma, TournamentPhaseStatus, UserRole } from "@prisma/client";
+import { Prisma, TournamentPhaseStatus, UserRole, WeaponGroup } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { calculateMatchingPower } from "@/lib/matchmaking/rating";
@@ -138,6 +138,7 @@ function waitingPlayer(params: {
   userId: string;
   rating?: string;
   areaXp?: number;
+  weaponGroup?: WeaponGroup;
   losingStreak?: number;
   joinedAt: Date;
   opponents?: string[];
@@ -150,6 +151,7 @@ function waitingPlayer(params: {
     rating: new Prisma.Decimal(params.rating ?? "1000"),
     losingStreak: params.losingStreak ?? 0,
     areaXp: params.areaXp ?? 2500,
+    weaponGroup: params.weaponGroup ?? WeaponGroup.MID,
     isDummy: false,
     completedMatchesInPhase: 0,
     recentOpponentIds: new Set(params.opponents ?? []),
@@ -322,6 +324,37 @@ describe("team assignment", () => {
     expect(new Set([...teams.teamA, ...teams.teamB].map((player) => player.userId))).toHaveLength(8);
     expect(sumA.sub(sumB).abs().toString()).toBe("0");
     expect(teams.matchingPowerDifference.toString()).toBe("0");
+  });
+
+  it("prefers mirrored weapon groups when assigning teams", () => {
+    const groups = [
+      WeaponGroup.BACK,
+      WeaponGroup.BACK,
+      WeaponGroup.MID,
+      WeaponGroup.MID,
+      WeaponGroup.MID,
+      WeaponGroup.MID,
+      WeaponGroup.FRONT,
+      WeaponGroup.FRONT,
+    ];
+    const players = groups.map((weaponGroup, index) => ({
+      ...waitingPlayer({
+        userId: `mirror-${index}`,
+        areaXp: 2500 + index * 100,
+        weaponGroup,
+        joinedAt: new Date("2026-08-22T00:00:00Z"),
+      }),
+      matchingPower: new Prisma.Decimal(2500 + index * 100),
+    }));
+
+    const teams = splitIntoBalancedTeams(players);
+
+    expect(teams.weaponGroupMirrorPenalty).toBe(0);
+    for (const group of [WeaponGroup.BACK, WeaponGroup.MID, WeaponGroup.FRONT]) {
+      expect(teams.teamA.filter((player) => player.weaponGroup === group)).toHaveLength(
+        teams.teamB.filter((player) => player.weaponGroup === group).length,
+      );
+    }
   });
 });
 

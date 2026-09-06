@@ -13,8 +13,9 @@ import { PlayerVoteForm } from "@/components/player-vote-form";
 import { ResultReportForm } from "@/components/result-report-form";
 import { auth } from "@/auth";
 import { formatRating } from "@/lib/format";
-import { matchRuleLabel, matchStatusLabel, teamLabel, tournamentPhaseTypeLabel } from "@/lib/labels";
+import { matchRuleLabel, matchStatusLabel, teamLabel, tournamentPhaseTypeLabel, weaponGroupLabel } from "@/lib/labels";
 import { canManage } from "@/lib/permissions";
+import { withPerf } from "@/lib/perf";
 import { prisma } from "@/lib/prisma";
 import { stageImagePath } from "@/lib/stages";
 
@@ -30,6 +31,7 @@ function publicImageExists(imagePath: string | null) {
 }
 
 export default async function MatchPage({ params }: PageProps) {
+  return withPerf("page-match", async () => {
   const { matchId } = await params;
   const session = await auth();
   const match = await prisma.match.findUnique({
@@ -166,7 +168,8 @@ export default async function MatchPage({ params }: PageProps) {
               )}
             </p>
             <p className="mt-1 text-zinc-600">
-              公開レート: {formatRating(participant?.rating ?? player.ratingBefore)} / {participant?.wins ?? 0}勝{participant?.losses ?? 0}敗
+              公開レート: {formatRating(participant?.rating ?? player.ratingBefore)} / {participant?.wins ?? 0}勝{participant?.losses ?? 0}敗 / 武器:{" "}
+              {weaponGroupLabel[player.weaponGroupAtMatch]}
             </p>
             {isAdmin && (
               <p className="mt-1 text-xs text-zinc-600">
@@ -458,4 +461,5 @@ export default async function MatchPage({ params }: PageProps) {
       </section>
     </main>
   );
+  });
 }

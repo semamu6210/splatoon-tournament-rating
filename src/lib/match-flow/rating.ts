@@ -1,4 +1,4 @@
-import { Prisma, type MatchPlayer, type PlayerVote, type Team, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
+import { Prisma, XpMultiplierTarget, type MatchPlayer, type PlayerVote, type Team, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
 
 import { findXpTier } from "@/lib/match-flow/xp";
 
@@ -57,7 +57,10 @@ export function calculatePlayerRatingResults(params: {
     const baseDelta = votePoints.add(winBonusUsed);
     const tier = findXpTier(player.areaXpAtMatch, params.xpTiers);
     const xpMultiplierUsed = new Prisma.Decimal(tier.multiplier);
-    const xpAdjustedDelta = baseDelta.mul(xpMultiplierUsed);
+    const xpAdjustedDelta =
+      params.config.xpMultiplierTarget === XpMultiplierTarget.VOTE_POINTS_ONLY
+        ? votePoints.mul(xpMultiplierUsed).add(winBonusUsed)
+        : baseDelta.mul(xpMultiplierUsed);
     const winningStreakBefore = winningStreakByUserId.get(player.userId) ?? 0;
     const winningStreakAfter = won ? winningStreakBefore + 1 : 0;
     const winningStreakBonusApplied =

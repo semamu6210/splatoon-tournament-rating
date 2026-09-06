@@ -11,6 +11,7 @@ import { auth } from "@/auth";
 import { formatRating } from "@/lib/format";
 import { tournamentPhaseStatusLabel, tournamentPhaseTypeLabel, tournamentStatusLabel } from "@/lib/labels";
 import { canManage } from "@/lib/permissions";
+import { withPerf } from "@/lib/perf";
 import { prisma } from "@/lib/prisma";
 import { filterTournamentRankingsForViewer, getTournamentRankings } from "@/lib/ranking-service";
 import { currentRoundStatusMessage, shouldShowWaitingForOtherBlocks } from "@/lib/round-status-ui";
@@ -33,6 +34,7 @@ function plainRankingRow(row: Awaited<ReturnType<typeof getTournamentRankings>>[
     losses: row.losses,
     matchesPlayed: row.matchesPlayed,
     areaXp: row.areaXp,
+    weaponGroup: row.weaponGroup,
     participantName: row.participantName,
     isDummy: row.isDummy,
     winningStreak: row.winningStreak,
@@ -45,6 +47,7 @@ function plainRankingRow(row: Awaited<ReturnType<typeof getTournamentRankings>>[
 }
 
 export default async function TournamentDetailPage({ params }: PageProps) {
+  return withPerf("page-tournament-detail", async () => {
   const { tournamentId } = await params;
   const session = await auth();
   const tournament = await prisma.tournament.findUnique({
@@ -370,4 +373,5 @@ export default async function TournamentDetailPage({ params }: PageProps) {
       </section>
     </main>
   );
+  });
 }

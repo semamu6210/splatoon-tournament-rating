@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: "Splatoon 大会レーティングシステム",
   description: "Splatoon大会向けのレート計算・マッチングサービスです。",
 };
+export const preferredRegion = "hnd1";
 
 export default function RootLayout({
   children,
