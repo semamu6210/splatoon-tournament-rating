@@ -20,7 +20,17 @@ export type TournamentInput = {
   stagePoolEnabled?: unknown;
   stageNames?: unknown;
   isTestTournament?: unknown;
+  participantCapacity?: unknown;
 };
+
+function participantCapacityValue(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const numberValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(numberValue) || numberValue <= 0 || numberValue > 1024) {
+    throw new ApiError(400, "participantCapacity must be an integer between 1 and 1024.");
+  }
+  return numberValue;
+}
 
 export function normalizeTournamentInput(input: TournamentInput) {
   const startsAt = optionalDate(input.startsAt, "startsAt");
@@ -39,6 +49,7 @@ export function normalizeTournamentInput(input: TournamentInput) {
     endsAt,
     stagePoolEnabled,
     stageNames,
+    participantCapacity: participantCapacityValue(input.participantCapacity),
     rankingVisibility: (
       input.rankingVisibility === "OWN_BLOCK_ONLY" ||
       input.rankingVisibility === "OWN_AND_OTHER_BLOCKS" ||
@@ -97,6 +108,15 @@ export async function updateTournament(adminUserId: string, tournamentId: string
 
     if (before.status !== TournamentStatus.DRAFT && before.status !== TournamentStatus.REGISTRATION) {
       throw new ApiError(400, "Only DRAFT or REGISTRATION tournaments can be edited.");
+    }
+
+    if (tournamentData.participantCapacity !== null) {
+      const activeParticipantCount = await tx.tournamentParticipant.count({
+        where: { tournamentId, isActive: true },
+      });
+      if (activeParticipantCount > tournamentData.participantCapacity) {
+        throw new ApiError(400, "participantCapacity cannot be less than current active participants.");
+      }
     }
 
     await tx.tournament.update({
@@ -355,6 +375,15 @@ export async function joinTournament(userId: string, tournamentId: string, input
 
     if (existing?.isActive) {
       throw new ApiError(409, "Already joined this tournament.");
+    }
+
+    if (!existing?.isActive && tournament.participantCapacity !== null) {
+      const activeParticipants = await tx.tournamentParticipant.count({
+        where: { tournamentId, isActive: true },
+      });
+      if (activeParticipants >= tournament.participantCapacity) {
+        throw new ApiError(400, "Tournament participant capacity has been reached.");
+      }
     }
 
     if (existing) {

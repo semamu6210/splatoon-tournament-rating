@@ -233,7 +233,10 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           <dl className="mt-3 grid gap-2 text-sm">
             <div>開始: {tournament.startsAt?.toLocaleString("ja-JP") ?? "未定"}</div>
             <div>終了: {tournament.endsAt?.toLocaleString("ja-JP") ?? "未定"}</div>
-            <div>参加者: {tournament.participants.length}人</div>
+            <div>
+              参加者: {tournament.participants.length}
+              {tournament.participantCapacity ? `/${tournament.participantCapacity}` : ""}人
+            </div>
           </dl>
         </section>
 

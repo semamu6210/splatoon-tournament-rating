@@ -101,6 +101,7 @@ model Tournament {
   rankingVisibility        RankingVisibility       @default(ALL)
   stagePoolEnabled         Boolean                 @default(false)
   isTestTournament         Boolean                 @default(false)
+  participantCapacity      Int?
   matches                  Match[]
   queueEntries             QueueEntry[]
   ratingHistories          RatingHistory[]

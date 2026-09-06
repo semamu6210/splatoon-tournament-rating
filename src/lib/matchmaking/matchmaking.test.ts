@@ -787,11 +787,86 @@ describe("queue and matchmaking service", () => {
     expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(0);
     expect((await prisma.tournamentPhaseRound.findUniqueOrThrow({ where: { phaseId_roundNumber: { phaseId: phase.id, roundNumber: 1 } } })).status).toBe("COMPLETED");
 
-    const retry = await runMatchmaking(phase.id);
-    expect(retry.matched).toBe(false);
-    if (retry.matched) throw new Error("Expected no match");
-    expect(retry.reason).toBe("REQUIRED_MATCHES_REACHED");
+    await expect(runMatchmaking(phase.id)).rejects.toThrow("Tournament and phase must be ACTIVE.");
     expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(0);
+  });
+
+  it("automatically completes the qualifier and confirms advancement without starting the main event", async () => {
+    const { tournament, phase, players } = await createActiveTournamentWithPhase(16);
+    await prisma.tournamentPhase.update({
+      where: { id: phase.id },
+      data: { requiredMatchesPerPlayer: 1, advancePlayerCount: 8, advancementMode: "OVERALL" },
+    });
+    const mainPhase = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "MAIN_EVENT",
+        status: "PENDING",
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 2,
+      },
+    });
+    await createBlocksForPlayers(phase.id, [
+      { name: "A", players: players.slice(0, 8) },
+      { name: "B", players: players.slice(8, 16) },
+    ]);
+    for (let index = 0; index < players.length; index += 1) {
+      await prisma.tournamentParticipant.update({
+        where: { tournamentId_userId: { tournamentId: tournament.id, userId: players[index].id } },
+        data: { rating: 2000 - index },
+      });
+    }
+
+    await runMatchmaking(phase.id);
+    await prisma.match.updateMany({
+      where: { phaseId: phase.id, roundNumber: 1 },
+      data: { status: "CONFIRMED", ratingAppliedAt: new Date() },
+    });
+    const result = await checkAndAdvanceRound(phase.id, 1);
+    const qualifierAfter = await prisma.tournamentPhase.findUniqueOrThrow({ where: { id: phase.id } });
+    const mainAfter = await prisma.tournamentPhase.findUniqueOrThrow({ where: { id: mainPhase.id } });
+    const mainMatches = await prisma.match.count({ where: { phaseId: mainPhase.id, roundNumber: 1 } });
+    const advancing = await prisma.tournamentPhaseParticipant.count({ where: { phaseId: mainPhase.id, isEligible: true } });
+
+    expect(result).toMatchObject({ completed: true, reason: "FINAL_ROUND_COMPLETED", qualifierCompleted: true });
+    expect(qualifierAfter.status).toBe("COMPLETED");
+    expect(mainAfter.status).toBe("PENDING");
+    expect(advancing).toBe(8);
+    expect(mainMatches).toBe(0);
+  });
+
+  it("automatically completes the main event and finishes the tournament after the final synchronized round", async () => {
+    const { tournament, phase, players } = await createActiveTournamentWithPhase(16);
+    await prisma.tournamentPhase.update({
+      where: { id: phase.id },
+      data: { phaseType: "MAIN_EVENT", requiredMatchesPerPlayer: 1 },
+    });
+    await prisma.tournamentParticipant.updateMany({
+      where: { tournamentId: tournament.id },
+      data: { advancedToMainEvent: true },
+    });
+    await createBlocksForPlayers(phase.id, [
+      { name: "A", players: players.slice(0, 8) },
+      { name: "B", players: players.slice(8, 16) },
+    ]);
+
+    await runMatchmaking(phase.id);
+    await prisma.match.updateMany({
+      where: { phaseId: phase.id, roundNumber: 1 },
+      data: { status: "CONFIRMED", ratingAppliedAt: new Date() },
+    });
+    const result = await checkAndAdvanceRound(phase.id, 1);
+    const finished = await prisma.tournament.findUniqueOrThrow({ where: { id: tournament.id } });
+    const phaseAfter = await prisma.tournamentPhase.findUniqueOrThrow({ where: { id: phase.id } });
+    const finalRanks = await prisma.tournamentParticipant.findMany({
+      where: { tournamentId: tournament.id, isActive: true },
+      select: { finalRank: true },
+    });
+
+    expect(result).toMatchObject({ completed: true, reason: "FINAL_ROUND_COMPLETED", tournamentFinished: true });
+    expect(phaseAfter.status).toBe("COMPLETED");
+    expect(finished.status).toBe("FINISHED");
+    expect(finalRanks.every((participant) => participant.finalRank !== null)).toBe(true);
   });
 
   it("continues from the latest completed round instead of recreating round one", async () => {

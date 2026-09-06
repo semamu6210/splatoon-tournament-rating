@@ -17,6 +17,7 @@ type TournamentFormProps = {
   initialStageNames?: string[];
   initialIsTestTournament?: boolean;
   canEditTestTournament?: boolean;
+  initialParticipantCapacity?: number | null;
 };
 
 function toInputDateTime(value?: string | null) {
@@ -35,6 +36,7 @@ export function TournamentForm({
   initialStageNames = DEFAULT_STAGE_NAMES.slice(0, 4),
   initialIsTestTournament = false,
   canEditTestTournament = mode === "create",
+  initialParticipantCapacity = null,
 }: TournamentFormProps) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export function TournamentForm({
       stagePoolEnabled,
       stageNames: stagePoolEnabled ? stageNames : undefined,
       isTestTournament,
+      participantCapacity: form.get("participantCapacity") || null,
     };
 
     const response = await fetch(mode === "create" ? "/api/tournaments" : `/api/tournaments/${tournamentId}`, {
@@ -117,6 +120,18 @@ export function TournamentForm({
           <option value="OVERALL_ONLY">{rankingVisibilityLabel.OVERALL_ONLY}</option>
           <option value="ALL">{rankingVisibilityLabel.ALL}</option>
         </select>
+      </label>
+      <label className="grid gap-1 text-sm">
+        参加定員
+        <input
+          className="rounded-md border border-zinc-300 px-3 py-2"
+          defaultValue={initialParticipantCapacity ?? ""}
+          min={1}
+          name="participantCapacity"
+          placeholder="未入力なら無制限"
+          step={1}
+          type="number"
+        />
       </label>
       <label className="grid gap-1 text-sm">
         終了日時

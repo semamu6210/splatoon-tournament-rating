@@ -288,6 +288,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
             initialEndsAt={tournament.endsAt?.toISOString() ?? null}
             initialName={tournament.name}
             initialIsTestTournament={tournament.isTestTournament}
+            initialParticipantCapacity={tournament.participantCapacity}
             initialRankingVisibility={tournament.rankingVisibility}
             initialStagePoolEnabled={tournament.stagePoolEnabled}
             initialStageNames={tournament.stages.map((stage) => stage.name)}
@@ -313,7 +314,10 @@ export default async function AdminTournamentPage({ params }: PageProps) {
           <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
             <div>大会状態: {tournamentStatusLabel[tournament.status]}</div>
             <div>現在フェーズ: {tournament.phases.find((phase) => phase.status === "ACTIVE")?.phaseType ? tournamentPhaseTypeLabel[tournament.phases.find((phase) => phase.status === "ACTIVE")!.phaseType] : "-"}</div>
-            <div>参加者数: {tournament.participants.filter((participant) => participant.isActive).length}</div>
+            <div>
+              参加者数: {tournament.participants.filter((participant) => participant.isActive).length}
+              {tournament.participantCapacity ? `/${tournament.participantCapacity}` : ""}
+            </div>
             <div>WAITING数: {waitingCount}</div>
             <div>未確定Match数: {unfinishedMatchCount}</div>
             <div>未投票Match数: {unvotedMatchCount}</div>

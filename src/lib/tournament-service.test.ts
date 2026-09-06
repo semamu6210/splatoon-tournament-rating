@@ -178,6 +178,41 @@ describe("tournament service", () => {
     );
   });
 
+  it("enforces participant capacity and allows editing it after tournament creation", async () => {
+    const admin = await createUser(UserRole.ADMIN);
+    const tournament = await createTournament(admin.id, {
+      name: `capacity-${crypto.randomUUID()}`,
+      startsAt: null,
+      endsAt: null,
+      participantCapacity: 1,
+    });
+    createdTournamentIds.push(tournament.id);
+    await openRegistration(admin.id, tournament.id);
+    const first = await createUser(UserRole.PLAYER);
+    const second = await createUser(UserRole.PLAYER);
+
+    await joinTournament(first.id, tournament.id, { areaXp: 2500, participantName: "First" });
+    await expect(joinTournament(second.id, tournament.id, { areaXp: 2500, participantName: "Second" })).rejects.toThrow(
+      "Tournament participant capacity has been reached.",
+    );
+
+    await updateTournament(admin.id, tournament.id, {
+      name: tournament.name,
+      startsAt: null,
+      endsAt: null,
+      participantCapacity: 2,
+    });
+    await joinTournament(second.id, tournament.id, { areaXp: 2500, participantName: "Second" });
+    await expect(
+      updateTournament(admin.id, tournament.id, {
+        name: tournament.name,
+        startsAt: null,
+        endsAt: null,
+        participantCapacity: 1,
+      }),
+    ).rejects.toThrow("participantCapacity cannot be less than current active participants.");
+  });
+
   it("allows participant name changes during REGISTRATION and rejects them after ACTIVE", async () => {
     const admin = await createUser(UserRole.ADMIN);
     const player = await createUser(UserRole.PLAYER);

@@ -1,10 +1,11 @@
-import { Prisma, QueueStatus, TournamentPhaseStatus, TournamentStatus, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
+import { Prisma, QueueStatus, TournamentPhaseStatus, TournamentPhaseType, TournamentStatus, type TournamentRatingConfig, type TournamentXpMultiplierTier } from "@prisma/client";
 import { randomInt } from "node:crypto";
 
 import { ApiError } from "@/lib/http";
 import { selectEightPlayers } from "@/lib/matchmaking/selection";
 import { splitIntoBalancedTeams } from "@/lib/matchmaking/team";
 import type { MatchmakingPlayer, WaitingPlayer } from "@/lib/matchmaking/types";
+import { completePhase, confirmQualifierAdvancement, finishTournament } from "@/lib/phase-service";
 import { perfSegment } from "@/lib/perf";
 import { prisma } from "@/lib/prisma";
 import { validateCompleteRatingConfig } from "@/lib/rating-config";
@@ -1072,7 +1073,27 @@ export async function checkAndAdvanceRound(phaseId: string, roundNumber: number 
 
       const allDone = await allPhaseTargetsReachedRequiredMatches(tx, phase);
       if (allDone || roundNumber >= phase.requiredMatchesPerPlayer) {
-        return { shouldStartNext: false as const, completed: true as const, reason: "FINAL_ROUND_COMPLETED" as const };
+        return {
+          shouldStartNext: false as const,
+          completed: true as const,
+          reason: "FINAL_ROUND_COMPLETED" as const,
+          autoFinish:
+            phase.phaseType === TournamentPhaseType.QUALIFIER
+              ? {
+                  type: "QUALIFIER" as const,
+                  phaseId,
+                  tournamentId: phase.tournamentId,
+                  adminUserId: phase.tournament.createdByUserId,
+                }
+              : phase.phaseType === TournamentPhaseType.MAIN_EVENT
+              ? {
+                  type: "MAIN_EVENT" as const,
+                  phaseId,
+                  tournamentId: phase.tournamentId,
+                  adminUserId: phase.tournament.createdByUserId,
+                }
+              : null,
+        };
       }
 
       await tx.tournamentPhaseRound.create({
@@ -1093,6 +1114,39 @@ export async function checkAndAdvanceRound(phaseId: string, roundNumber: number 
       return null;
     });
     return { advanced: true as const, roundNumber: result.nextRoundNumber, matchmaking };
+  }
+
+  if (result.completed && "autoFinish" in result && result.autoFinish) {
+    try {
+      if (result.autoFinish.type === "QUALIFIER") {
+        await completePhase(result.autoFinish.adminUserId, result.autoFinish.phaseId);
+        const advancement = await confirmQualifierAdvancement(result.autoFinish.adminUserId, result.autoFinish.phaseId);
+        return {
+          advanced: false as const,
+          completed: true as const,
+          reason: result.reason,
+          qualifierCompleted: true as const,
+          advancement,
+        };
+      }
+
+      await completePhase(result.autoFinish.adminUserId, result.autoFinish.phaseId);
+      const tournament = await finishTournament(result.autoFinish.adminUserId, result.autoFinish.tournamentId);
+      return {
+        advanced: false as const,
+        completed: true as const,
+        reason: result.reason,
+        tournamentFinished: true as const,
+        tournament,
+      };
+    } catch (error) {
+      console.error("AUTO_PHASE_FINISH_FAILED", {
+        phaseId,
+        roundNumber,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { advanced: false as const, ...result, tournamentFinished: false as const };
+    }
   }
 
   return { advanced: false as const, ...result };
