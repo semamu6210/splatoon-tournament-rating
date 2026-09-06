@@ -288,6 +288,11 @@ export async function startPhase(adminUserId: string, phaseId: string) {
           }
         }
 
+        const activeConfig = await tx.tournamentRatingConfig.findFirst({
+          where: { tournamentId: phase.tournamentId, isActive: true },
+        });
+        if (!activeConfig) throw new ApiError(400, "Active rating config not found.");
+
         const sourceParticipants =
           phase.phaseType === "MAIN_EVENT"
             ? await tx.tournamentPhaseParticipant.findMany({
@@ -304,6 +309,24 @@ export async function startPhase(adminUserId: string, phaseId: string) {
             : sourceParticipants;
 
         if (participants.length === 0) throw new ApiError(400, "Phase has no eligible participants.");
+
+        if (phase.phaseType === "MAIN_EVENT") {
+          const initializedAt = new Date();
+          await tx.tournamentParticipant.updateMany({
+            where: { id: { in: participants.map((participant) => participant.id) } },
+            data: {
+              rating: "1000",
+              ratingInitializedAt: initializedAt,
+              initialRatingConfigId: activeConfig.id,
+              initialRatingConfigVersion: activeConfig.version,
+              wins: 0,
+              losses: 0,
+              matchesPlayed: 0,
+              winningStreak: 0,
+              losingStreak: 0,
+            },
+          });
+        }
 
         await tx.tournamentPhaseParticipant.createMany({
           data: participants.map((participant) => ({

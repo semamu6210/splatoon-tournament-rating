@@ -83,6 +83,14 @@ export type BlockAdvancementCandidates = {
 const TOURNAMENT_RANKINGS_TTL_MS = 20_000;
 const tournamentRankingCache = new Map<string, { expiresAt: number; value: Promise<{ overall: RankingRow[]; blocks: TournamentRankingBlock[] }> }>();
 
+type PhaseForRanking = {
+  id: string;
+  tournamentId: string;
+  phaseType: TournamentPhaseType;
+  status: string;
+  requiredMatchesPerPlayer: number;
+};
+
 export function assignCompetitionRanks(participants: RankedParticipant[]): RankingRow[] {
   const rows: RankingRow[] = [];
   let previousRating: Prisma.Decimal | null = null;
@@ -125,6 +133,59 @@ export function assignCompetitionRanks(participants: RankedParticipant[]): Ranki
   });
 
   return rows;
+}
+
+async function buildPhaseScopedRows(phase: PhaseForRanking, participants: RankedParticipant[]) {
+  const userIds = participants.map((participant) => participant.userId);
+  const [histories, matchPlayers] = await Promise.all([
+    prisma.ratingHistory.findMany({
+      where: { userId: { in: userIds }, match: { phaseId: phase.id, status: "CONFIRMED" } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.matchPlayer.findMany({
+      where: { userId: { in: userIds }, match: { phaseId: phase.id, status: "CONFIRMED" } },
+      select: { userId: true, team: true, match: { select: { winnerTeam: true } } },
+    }),
+  ]);
+  const latestRatingByUserId = new Map<string, Prisma.Decimal>();
+  for (const history of histories) {
+    latestRatingByUserId.set(history.userId, history.ratingAfter);
+  }
+  const statsByUserId = new Map<string, { wins: number; losses: number; matchesPlayed: number }>();
+  for (const player of matchPlayers) {
+    const stats = statsByUserId.get(player.userId) ?? { wins: 0, losses: 0, matchesPlayed: 0 };
+    stats.matchesPlayed += 1;
+    if (player.match.winnerTeam === player.team) stats.wins += 1;
+    if (player.match.winnerTeam && player.match.winnerTeam !== player.team) stats.losses += 1;
+    statsByUserId.set(player.userId, stats);
+  }
+
+  const scopedParticipants = participants.map((participant) => {
+    const stats = statsByUserId.get(participant.userId) ?? { wins: 0, losses: 0, matchesPlayed: 0 };
+    return {
+      ...participant,
+      rating: latestRatingByUserId.get(participant.userId) ?? participant.rating,
+      wins: stats.wins,
+      losses: stats.losses,
+      matchesPlayed: stats.matchesPlayed,
+    };
+  });
+
+  const rows = assignCompetitionRanks(
+    scopedParticipants.sort((left, right) => new Prisma.Decimal(right.rating ?? 0).comparedTo(left.rating ?? 0)),
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    currentPhase: {
+      id: phase.id,
+      phaseType: phase.phaseType,
+      status: phase.status,
+      requiredMatchesPerPlayer: phase.requiredMatchesPerPlayer,
+      confirmedMatchesInPhase: row.matchesPlayed,
+      remainingMatchesInPhase: Math.max(phase.requiredMatchesPerPlayer - row.matchesPlayed, 0),
+    },
+  }));
 }
 
 async function confirmedCountsByUser(phaseId: string, userIds: string[]) {
@@ -184,34 +245,14 @@ export async function getPhaseRanking(phaseId: string) {
   const target = await getPhaseTargetParticipants(phaseId);
   if (!target) return null;
 
-  const participants = [...target.participants].sort((left, right) => {
-    const compared = new Prisma.Decimal(right.rating ?? 0).comparedTo(left.rating ?? 0);
-    return compared;
-  });
-  const rows = assignCompetitionRanks(participants);
-  const counts = await confirmedCountsByUser(phaseId, rows.map((row) => row.userId));
-
   return {
     phase: target.phase,
-    rows: rows.map((row) => {
-      const confirmedMatchesInPhase = counts.get(row.userId) ?? 0;
-      return {
-        ...row,
-        currentPhase: {
-          id: target.phase.id,
-          phaseType: target.phase.phaseType,
-          status: target.phase.status,
-          requiredMatchesPerPlayer: target.phase.requiredMatchesPerPlayer,
-          confirmedMatchesInPhase,
-          remainingMatchesInPhase: Math.max(target.phase.requiredMatchesPerPlayer - confirmedMatchesInPhase, 0),
-        },
-      };
-    }),
+    rows: await buildPhaseScopedRows(target.phase, target.participants),
   };
 }
 
 async function loadTournamentRankings(tournamentId: string) {
-  const participants = await prisma.tournamentParticipant.findMany({
+  const allParticipants = await prisma.tournamentParticipant.findMany({
     where: {
       tournamentId,
       isActive: true,
@@ -228,9 +269,22 @@ async function loadTournamentRankings(tournamentId: string) {
     where: { tournamentId, status: "ACTIVE" },
     orderBy: { sortOrder: "asc" },
   });
-  const rows = assignCompetitionRanks(participants);
+  const displayPhase =
+    activePhase ??
+    (await prisma.tournamentPhase.findFirst({
+      where: { tournamentId, phaseType: "MAIN_EVENT", status: "COMPLETED" },
+      orderBy: { sortOrder: "desc" },
+    })) ??
+    (await prisma.tournamentPhase.findFirst({
+      where: { tournamentId, phaseType: "QUALIFIER", status: "COMPLETED" },
+      orderBy: { sortOrder: "desc" },
+    }));
+  const displayPhaseTarget = displayPhase ? await getPhaseTargetParticipants(displayPhase.id) : null;
+  const rows = displayPhaseTarget
+    ? await buildPhaseScopedRows(displayPhaseTarget.phase, displayPhaseTarget.participants)
+    : assignCompetitionRanks(allParticipants);
 
-  if (activePhase) {
+  if (activePhase && !displayPhaseTarget) {
     const counts = await confirmedCountsByUser(activePhase.id, rows.map((row) => row.userId));
     for (const row of rows) {
       const confirmedMatchesInPhase = counts.get(row.userId) ?? 0;
@@ -264,20 +318,21 @@ async function loadTournamentRankings(tournamentId: string) {
     orderBy: { sortOrder: "asc" },
   });
 
-  const blocks = phases.flatMap((phase) =>
-    phase.blocks.map((block) => ({
-      phaseId: phase.id,
-      phaseType: phase.phaseType,
-      blockId: block.id,
-      blockName: block.name,
-      rows: assignCompetitionRanks(
-        block.participants
-          .map((item) => item.tournamentParticipant)
-          .filter((participant) => participant.isActive && participant.rating !== null)
-          .sort((left, right) => new Prisma.Decimal(right.rating ?? 0).comparedTo(left.rating ?? 0)),
-      ),
-    })),
-  );
+  const blocks: TournamentRankingBlock[] = [];
+  for (const phase of phases) {
+    for (const block of phase.blocks) {
+      const participants = block.participants
+        .map((item) => item.tournamentParticipant)
+        .filter((participant) => participant.isActive && participant.rating !== null);
+      blocks.push({
+        phaseId: phase.id,
+        phaseType: phase.phaseType,
+        blockId: block.id,
+        blockName: block.name,
+        rows: await buildPhaseScopedRows(phase, participants),
+      });
+    }
+  }
 
   return { overall: rows, blocks };
 }

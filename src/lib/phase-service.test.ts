@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { autoAssignPhaseBlocks, createPhaseBlocks, moveParticipantToBlock } from "@/lib/block-service";
 import { completePhase, confirmQualifierAdvancement, createPhase, finishTournament, startPhase, updatePhase } from "@/lib/phase-service";
 import { joinQueue } from "@/lib/matchmaking/service";
-import { assignCompetitionRanks, filterTournamentRankingsForViewer, getTournamentRankings } from "@/lib/ranking-service";
+import { assignCompetitionRanks, filterTournamentRankingsForViewer, getPhaseRanking, getTournamentRankings } from "@/lib/ranking-service";
 import { prisma } from "@/lib/prisma";
 import { getTournamentOperationWarnings } from "@/lib/operations-monitor";
 import { buildDefaultMultiplierPayload } from "@/lib/rating-config";
@@ -85,6 +85,39 @@ async function createConfirmedMatchForUsers(tournamentId: string, phaseId: strin
       areaXpAtMatch: 2500,
       losingStreakAtMatch: 0,
       ratingAfter: "1000",
+    })),
+  });
+}
+
+async function createRatingHistoriesForMatch(
+  tournamentId: string,
+  matchId: string,
+  userIds: string[],
+  ratingAfterByUserId: Map<string, number>,
+) {
+  const config = await prisma.tournamentRatingConfig.findFirstOrThrow({
+    where: { tournamentId, isActive: true },
+  });
+  await prisma.ratingHistory.createMany({
+    data: userIds.map((userId) => ({
+      tournamentId,
+      matchId,
+      userId,
+      ratingConfigIdUsed: config.id,
+      ratingConfigVersionUsed: config.version,
+      ratingBefore: "1000",
+      strongVotesReceived: 0,
+      weakVotesReceived: 0,
+      strongVotePointsUsed: "0",
+      weakVotePointsUsed: "0",
+      winBonusUsed: "0",
+      losingStreakPenaltyUsed: "0",
+      votePoints: "0",
+      baseDelta: "0",
+      areaXpUsed: 2500,
+      xpMultiplierUsed: "1",
+      finalDelta: "0",
+      ratingAfter: ratingAfterByUserId.get(userId) ?? 1000,
     })),
   });
 }
@@ -215,6 +248,58 @@ describe("phase progression", () => {
 
     const mainTargets = await prisma.tournamentPhaseParticipant.findMany({ where: { phaseId: mainEvent.id } });
     expect(mainTargets).toHaveLength(2);
+  });
+
+  it("starts main event ratings from 1000 while keeping qualifier ranking separate", async () => {
+    const { admin, tournament, players } = await createActiveTournament(8);
+    const qualifier = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.ACTIVE,
+        requiredMatchesPerPlayer: 1,
+        advancePlayerCount: 2,
+        sortOrder: 1,
+      },
+    });
+    const mainEvent = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "MAIN_EVENT",
+        status: TournamentPhaseStatus.PENDING,
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 2,
+      },
+    });
+    for (let index = 0; index < players.length; index += 1) {
+      await prisma.tournamentParticipant.update({
+        where: { tournamentId_userId: { tournamentId: tournament.id, userId: players[index].id } },
+        data: { rating: 2000 - index },
+      });
+    }
+    await createConfirmedMatchForUsers(tournament.id, qualifier.id, players.map((player) => player.id));
+    const qualifierMatch = await prisma.match.findFirstOrThrow({
+      where: { tournamentId: tournament.id, phaseId: qualifier.id, status: "CONFIRMED" },
+    });
+    await createRatingHistoriesForMatch(
+      tournament.id,
+      qualifierMatch.id,
+      players.map((player) => player.id),
+      new Map(players.map((player, index) => [player.id, 2000 - index])),
+    );
+    await completePhase(admin.id, qualifier.id);
+    await confirmQualifierAdvancement(admin.id, qualifier.id);
+    await startPhase(admin.id, mainEvent.id);
+
+    const qualifierRanking = await getPhaseRanking(qualifier.id);
+    const mainRanking = await getPhaseRanking(mainEvent.id);
+    const tournamentRanking = await getTournamentRankings(tournament.id);
+
+    expect(qualifierRanking?.rows[0].rating).toBe("2000");
+    expect(mainRanking?.rows).toHaveLength(2);
+    expect(mainRanking?.rows.every((row) => row.rating === "1000")).toBe(true);
+    expect(tournamentRanking.overall).toHaveLength(2);
+    expect(tournamentRanking.overall.every((row) => row.rating === "1000")).toBe(true);
   });
 
   it("reports NEEDS_ADMIN_DECISION when an advancement boundary has equal rating", async () => {
