@@ -266,6 +266,35 @@ describe("phase progression", () => {
     await expect(joinQueue(players[0].id, qualifier.id)).rejects.toThrow("Required match count has already been reached.");
   });
 
+  it("allows completing a qualifier while players are still waiting in queue", async () => {
+    const { admin, tournament, players } = await createActiveTournament(8);
+    const qualifier = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.ACTIVE,
+        requiredMatchesPerPlayer: 1,
+        advancePlayerCount: 4,
+        sortOrder: 1,
+      },
+    });
+
+    await createConfirmedMatchForUsers(tournament.id, qualifier.id, players.map((player) => player.id));
+    await prisma.queueEntry.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseId: qualifier.id,
+        userId: players[0].id,
+        status: "WAITING",
+      },
+    });
+
+    const completed = await completePhase(admin.id, qualifier.id);
+
+    expect(completed.status).toBe("COMPLETED");
+    expect(await prisma.queueEntry.count({ where: { phaseId: qualifier.id, status: "WAITING" } })).toBe(1);
+  });
+
   it("creates block rankings and prevents duplicate block membership inside the same phase", async () => {
     const { tournament, players } = await createActiveTournament(8);
     const qualifier = await prisma.tournamentPhase.create({

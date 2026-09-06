@@ -235,7 +235,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
       return [
         phase.id,
         {
-          canComplete: phase.status === "ACTIVE" && completeCount === targetUserIds.length && unfinishedMatchCount === 0 && waitingQueueEntries === 0,
+          canComplete: phase.status === "ACTIVE" && completeCount === targetUserIds.length && unfinishedMatchCount === 0,
           completeCount,
           rowCount: targetUserIds.length,
           unfinishedMatches: unfinishedMatchCount,

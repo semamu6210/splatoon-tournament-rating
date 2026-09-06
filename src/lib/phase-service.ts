@@ -65,11 +65,6 @@ async function assertNoOpenMatches(tx: Tx, phaseId: string) {
   if (openMatches > 0) throw new ApiError(400, "Phase has unfinished matches.");
 }
 
-async function assertNoWaitingQueue(tx: Tx, phaseId: string) {
-  const waiting = await tx.queueEntry.count({ where: { phaseId, status: "WAITING" } });
-  if (waiting > 0) throw new ApiError(400, "Phase has WAITING queue entries. Cancel them before completing.");
-}
-
 async function assertRequiredMatchesCompleted(
   tx: Tx,
   phase: { id: string; tournamentId: string; phaseType: TournamentPhaseType; requiredMatchesPerPlayer: number },
@@ -375,8 +370,7 @@ export async function getPhaseReadiness(phaseId: string) {
     canComplete:
       target.phase.status === "ACTIVE" &&
       rows.every((row) => row.complete) &&
-      unfinishedMatches === 0 &&
-      waitingQueueEntries === 0,
+      unfinishedMatches === 0,
   };
 }
 
@@ -434,7 +428,6 @@ export async function completePhase(adminUserId: string, phaseId: string) {
         if (phase.status !== TournamentPhaseStatus.ACTIVE) throw new ApiError(400, "Phase must be ACTIVE.");
 
         await assertNoOpenMatches(tx, phaseId);
-        await assertNoWaitingQueue(tx, phaseId);
         await assertRequiredMatchesCompleted(tx, phase);
 
         const completed = await tx.tournamentPhase.update({
