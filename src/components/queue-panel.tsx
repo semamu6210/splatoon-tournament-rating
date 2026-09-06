@@ -131,14 +131,16 @@ export function QueuePanel({ phaseId, initialStatus, queueEntryId }: QueuePanelP
           <p className="text-sm text-zinc-700">マッチング待機中</p>
           <p className="text-sm text-zinc-600">開始: {new Date(status.joinedAt).toLocaleString("ja-JP")}</p>
           <p className="text-sm text-zinc-600">待機秒数: {status.waitingSeconds}</p>
-          <button
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold disabled:bg-zinc-100"
-            disabled={pending}
-            onClick={() => void post(`/api/phases/${phaseId}/queue/leave`)}
-            type="button"
-          >
-            待機解除
-          </button>
+          {queueEntryId && (
+            <button
+              className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold disabled:bg-zinc-100"
+              disabled={pending}
+              onClick={() => void post(`/api/phases/${phaseId}/queue/leave`)}
+              type="button"
+            >
+              待機解除
+            </button>
+          )}
         </div>
       )}
       {status?.status === "MATCHED" && (

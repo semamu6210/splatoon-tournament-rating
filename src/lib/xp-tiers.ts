@@ -12,7 +12,7 @@ export function buildXpTierRanges(stepSize: 50 | 100): Array<Omit<XpTier, "multi
 
   let sortOrder = 2;
 
-  for (let minXp = 2000; minXp < 3000; minXp += stepSize) {
+  for (let minXp = 2000; minXp < 3500; minXp += stepSize) {
     tiers.push({
       minXp,
       maxXp: minXp + stepSize - 1,
@@ -21,7 +21,7 @@ export function buildXpTierRanges(stepSize: 50 | 100): Array<Omit<XpTier, "multi
     sortOrder += 1;
   }
 
-  tiers.push({ minXp: 3000, maxXp: null, sortOrder });
+  tiers.push({ minXp: 3500, maxXp: null, sortOrder });
 
   return tiers;
 }

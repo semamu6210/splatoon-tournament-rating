@@ -128,8 +128,8 @@ describe("tournament service", () => {
       [1, false],
       [2, true],
     ]);
-    expect(configs[0].xpMultiplierTiers).toHaveLength(12);
-    expect(configs[1].xpMultiplierTiers).toHaveLength(22);
+    expect(configs[0].xpMultiplierTiers).toHaveLength(17);
+    expect(configs[1].xpMultiplierTiers).toHaveLength(32);
     expect(configs.filter((config) => config.isActive)).toHaveLength(1);
   });
 

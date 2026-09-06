@@ -100,6 +100,7 @@ export default async function TournamentDetailPage({ params }: PageProps) {
   const myBlock = session?.user?.id
     ? rankings.blocks.find((block) => block.rows.some((row) => row.userId === session.user?.id))
     : null;
+  const myActivePhaseCount = myRanking?.currentPhase?.confirmedMatchesInPhase ?? 0;
   const queueEntry =
     session?.user?.id && activePhase
       ? await prisma.queueEntry.findFirst({
@@ -150,6 +151,8 @@ export default async function TournamentDetailPage({ params }: PageProps) {
           ? { status: "MATCHED" as const, matchId: myCurrentRoundMatch.id }
         : activeMatch
           ? { status: "MATCHED" as const, matchId: activeMatch.id }
+        : activePhase && activeRound && myActivePhaseCount > 0 && myActivePhaseCount < activePhase.requiredMatchesPerPlayer
+          ? { status: "WAITING" as const, joinedAt: new Date().toISOString(), waitingSeconds: 0 }
         : { status: "NOT_QUEUED" as const };
   const myVoteStats =
     session?.user && myParticipant
@@ -200,7 +203,6 @@ export default async function TournamentDetailPage({ params }: PageProps) {
       percentage: totalSlots > 0 ? Math.round((completedSlots / totalSlots) * 100) : 0,
     };
   });
-  const myActivePhaseCount = myRanking?.currentPhase?.confirmedMatchesInPhase ?? 0;
   const waitingForOtherBlocks = shouldShowWaitingForOtherBlocks({
     activePhaseExists: Boolean(activePhase),
     activeRoundExists: Boolean(activeRound),
