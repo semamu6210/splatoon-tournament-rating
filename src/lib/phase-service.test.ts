@@ -180,6 +180,43 @@ describe("phase progression", () => {
     expect(reloadedMainTargets).toHaveLength(2);
   });
 
+  it("allows qualifier advancement confirmation to be submitted again without duplicate main targets", async () => {
+    const { admin, tournament, players } = await createActiveTournament(8);
+    const qualifier = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "QUALIFIER",
+        status: TournamentPhaseStatus.ACTIVE,
+        requiredMatchesPerPlayer: 1,
+        advancePlayerCount: 2,
+        sortOrder: 1,
+      },
+    });
+    const mainEvent = await prisma.tournamentPhase.create({
+      data: {
+        tournamentId: tournament.id,
+        phaseType: "MAIN_EVENT",
+        status: TournamentPhaseStatus.PENDING,
+        requiredMatchesPerPlayer: 1,
+        sortOrder: 2,
+      },
+    });
+    for (let index = 0; index < players.length; index += 1) {
+      await prisma.tournamentParticipant.update({
+        where: { tournamentId_userId: { tournamentId: tournament.id, userId: players[index].id } },
+        data: { rating: 2000 - index },
+      });
+    }
+    await createConfirmedMatchForUsers(tournament.id, qualifier.id, players.map((player) => player.id));
+    await completePhase(admin.id, qualifier.id);
+
+    await confirmQualifierAdvancement(admin.id, qualifier.id);
+    await confirmQualifierAdvancement(admin.id, qualifier.id);
+
+    const mainTargets = await prisma.tournamentPhaseParticipant.findMany({ where: { phaseId: mainEvent.id } });
+    expect(mainTargets).toHaveLength(2);
+  });
+
   it("reports NEEDS_ADMIN_DECISION when an advancement boundary has equal rating", async () => {
     const { admin, tournament, players } = await createActiveTournament(8);
     const qualifier = await prisma.tournamentPhase.create({

@@ -452,6 +452,8 @@ export async function completePhase(adminUserId: string, phaseId: string) {
 }
 
 export async function confirmQualifierAdvancement(adminUserId: string, phaseId: string, selectedTournamentParticipantIds?: string[]) {
+  const preview = await getQualifierAdvancementPreview(phaseId);
+
   return withSerializable(() =>
     prisma.$transaction(
       async (tx) => {
@@ -460,7 +462,6 @@ export async function confirmQualifierAdvancement(adminUserId: string, phaseId: 
         if (phase.phaseType !== TournamentPhaseType.QUALIFIER) throw new ApiError(400, "Phase must be QUALIFIER.");
         if (phase.status !== TournamentPhaseStatus.COMPLETED) throw new ApiError(400, "Qualifier phase must be COMPLETED.");
 
-        const preview = await getQualifierAdvancementPreview(phaseId);
         const selectedIds = selectedTournamentParticipantIds ?? [];
         let advancingIds: string[] = [];
         const tieCandidates: string[] = [];
