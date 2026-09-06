@@ -384,22 +384,12 @@ export function buildBlockAdvancementCandidates(
   blocks: Array<{ blockId: string; blockName: string; advancePlayerCount: number | null; rows: RankingRow[] }>,
 ): BlockAdvancementCandidates {
   const blockPreviews = blocks.map((block) => {
-    if (!block.advancePlayerCount || block.advancePlayerCount <= 0) {
-      return {
-        blockId: block.blockId,
-        blockName: block.blockName,
-        advancePlayerCount: 0,
-        autoAdvanceRows: [],
-        boundaryTieRows: [],
-        requiredAdminSelections: 0,
-        status: "READY" as const,
-      };
-    }
-    const preview = buildOverallAdvancementCandidates(block.rows, block.advancePlayerCount);
+    const advancePlayerCount = block.advancePlayerCount && block.advancePlayerCount > 0 ? block.advancePlayerCount : block.rows.length;
+    const preview = buildOverallAdvancementCandidates(block.rows, advancePlayerCount);
     return {
       blockId: block.blockId,
       blockName: block.blockName,
-      advancePlayerCount: block.advancePlayerCount,
+      advancePlayerCount,
       autoAdvanceRows: preview.autoAdvanceRows,
       boundaryTieRows: preview.boundaryTieRows,
       requiredAdminSelections: preview.requiredAdminSelections,

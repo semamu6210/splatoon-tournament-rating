@@ -429,13 +429,14 @@ export async function getQualifierAdvancementPreview(phaseId: string) {
         .map((item) => item.tournamentParticipant)
         .filter((participant) => participant.isActive && participant.rating !== null)
         .sort((left, right) => new Prisma.Decimal(right.rating ?? 0).comparedTo(left.rating ?? 0));
-      if (block.advancePlayerCount && block.advancePlayerCount > participants.length) {
+      const advancePlayerCount = block.advancePlayerCount && block.advancePlayerCount > 0 ? block.advancePlayerCount : participants.length;
+      if (advancePlayerCount > participants.length) {
         throw new ApiError(400, "advancePlayerCount cannot exceed block participant count.");
       }
       return {
         blockId: block.id,
         blockName: block.name,
-        advancePlayerCount: block.advancePlayerCount ?? participants.length,
+        advancePlayerCount,
         rows: assignCompetitionRanks(participants),
       };
     }),
@@ -492,7 +493,6 @@ export async function confirmQualifierAdvancement(adminUserId: string, phaseId: 
 
         if ("blocks" in preview) {
           for (const block of preview.blocks) {
-            if (block.advancePlayerCount <= 0) throw new ApiError(400, "Each block must have advancePlayerCount.");
             advancingIds.push(...block.autoAdvanceRows.map((row) => row.tournamentParticipantId));
             tieCandidates.push(...block.boundaryTieRows.map((row) => row.tournamentParticipantId));
             if (block.status === "NEEDS_ADMIN_DECISION") {
