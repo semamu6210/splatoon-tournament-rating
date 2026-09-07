@@ -208,6 +208,11 @@ export default async function MatchPage({ params }: PageProps) {
             <p className="mt-1 text-sm text-zinc-600">
               試合番号: #{match.matchNumber ?? "-"} / 第{match.roundNumber ?? "-"}試合 / ルール: {matchRuleLabel[match.rule]}
             </p>
+            {match.spectatorCameraEnabled && (
+              <p className="mt-2 w-fit rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-900">
+                観戦カメラが入ります
+              </p>
+            )}
           </div>
           <AuthControls />
         </header>

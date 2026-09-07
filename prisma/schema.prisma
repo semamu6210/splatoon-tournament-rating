@@ -355,6 +355,7 @@ model Match {
   stageName           String?
   privateRoomCode     String?                @unique(map: "Match_active_privateRoomCode_key", where: raw("((\"privateRoomCode\" IS NOT NULL) AND (status = ANY (ARRAY['CREATED'::\"MatchStatus\", 'PLAYING'::\"MatchStatus\", 'RESULT_REPORTING'::\"MatchStatus\", 'VOTE_REPORTING'::\"MatchStatus\"])))"))
   roomHostUserId      String?
+  spectatorCameraEnabled Boolean             @default(false)
   phase               TournamentPhase        @relation(fields: [phaseId], references: [id], onDelete: Cascade)
   ratingConfig        TournamentRatingConfig @relation(fields: [ratingConfigId], references: [id])
   roomHost            User?                  @relation("MatchRoomHost", fields: [roomHostUserId], references: [id])

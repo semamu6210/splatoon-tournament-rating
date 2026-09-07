@@ -547,6 +547,7 @@ async function createMatchForSelectedPlayers(params: {
   selected: MatchmakingPlayer[];
   roundNumber?: number;
   queueEntryIds?: string[];
+  spectatorCameraEnabled?: boolean;
 }) {
   validateEightPlayers(params.selected);
   const teams = await perfSegment("matchmaking.teamOptimization", "calculation", () => splitIntoBalancedTeams(params.selected));
@@ -572,6 +573,7 @@ async function createMatchForSelectedPlayers(params: {
       stageName: selectedStage?.name,
       privateRoomCode,
       roomHostUserId,
+      spectatorCameraEnabled: params.spectatorCameraEnabled ?? false,
       status: "PLAYING",
       startedAt: new Date(),
     },
@@ -719,6 +721,7 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
   validateCompleteRatingConfig(activeConfig);
 
   const createdMatchIds: string[] = [];
+  const spectatorCameraBlockIndex = (roundNumber - 1) % blocks.length;
   const totalSummary = emptyExclusionSummary(blocks.reduce((sum, block) => sum + block.participants.length, 0));
   const blockSummaries: Array<{ blockId: string; eligible: number; waiting: number; excluded: MatchmakingExclusionSummary["excluded"] }> = [];
   for (const block of blocks) {
@@ -806,7 +809,14 @@ async function runSynchronizedRoundMatchmaking(tx: Tx, phase: Awaited<ReturnType
         recentTeammateIds: new Set(),
         matchingPower: new Prisma.Decimal(participant.areaXp - participant.losingStreak * 50),
       }));
-      const created = await createMatchForSelectedPlayers({ tx, phase, activeConfig, selected, roundNumber });
+      const created = await createMatchForSelectedPlayers({
+        tx,
+        phase,
+        activeConfig,
+        selected,
+        roundNumber,
+        spectatorCameraEnabled: blocks[spectatorCameraBlockIndex]?.id === block.id && index === 0,
+      });
       createdMatchIds.push(created.match.id);
       madeBlockMatch = true;
     }

@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { weaponGroupLabel } from "@/lib/labels";
+
 type JoinFormProps = {
   tournamentId: string;
   initialParticipantName?: string;
@@ -66,16 +68,16 @@ export function JoinForm({ tournamentId, initialParticipantName = "" }: JoinForm
         />
       </label>
       <label className="grid gap-1 text-sm">
-        武器グループ
+        役割グループ
         <select className="rounded-md border border-zinc-300 px-3 py-2" defaultValue="" name="weaponGroup" required>
           <option disabled value="">
             選択してください
           </option>
-          <option value="FRONT">塗り</option>
-          <option value="MID">キル</option>
-          <option value="BACK">後衛</option>
+          <option value="FRONT">{weaponGroupLabel.FRONT}</option>
+          <option value="MID">{weaponGroupLabel.MID}</option>
+          <option value="BACK">{weaponGroupLabel.BACK}</option>
         </select>
-        <span className="text-xs text-zinc-600">同じグループに含まれるプレイヤーとミラーとしてマッチングします</span>
+        <span className="text-xs text-zinc-600">塗り・キル・後衛の近い役割同士でマッチングします</span>
       </label>
       <button className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-zinc-400" disabled={pending}>
         {pending ? "登録中..." : "参加登録"}

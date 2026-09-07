@@ -633,6 +633,34 @@ describe("queue and matchmaking service", () => {
     expect(await prisma.match.count({ where: { phaseId: phase.id, roundNumber: 2 } })).toBe(2);
   });
 
+  it("assigns one spectator camera match per synchronized round and rotates blocks", async () => {
+    const { phase, players } = await createActiveTournamentWithPhase(16);
+    await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 2 } });
+    await createBlocksForPlayers(phase.id, [
+      { name: "A", players: players.slice(0, 8) },
+      { name: "B", players: players.slice(8, 16) },
+    ]);
+
+    await runMatchmaking(phase.id);
+    const roundOneMatches = await prisma.match.findMany({
+      where: { phaseId: phase.id, roundNumber: 1 },
+      orderBy: { matchNumber: "asc" },
+    });
+    expect(roundOneMatches.map((match) => match.spectatorCameraEnabled)).toEqual([true, false]);
+
+    await prisma.match.updateMany({
+      where: { phaseId: phase.id, roundNumber: 1 },
+      data: { status: "CONFIRMED", ratingAppliedAt: new Date() },
+    });
+    await checkAndAdvanceRound(phase.id, 1);
+    const roundTwoMatches = await prisma.match.findMany({
+      where: { phaseId: phase.id, roundNumber: 2 },
+      orderBy: { matchNumber: "asc" },
+    });
+
+    expect(roundTwoMatches.map((match) => match.spectatorCameraEnabled)).toEqual([false, true]);
+  });
+
   it("keeps lite queue status waiting after a synchronized round match is confirmed while other blocks continue", async () => {
     const { phase, players } = await createActiveTournamentWithPhase(16);
     await prisma.tournamentPhase.update({ where: { id: phase.id }, data: { requiredMatchesPerPlayer: 2 } });

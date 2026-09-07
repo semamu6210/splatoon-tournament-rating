@@ -467,6 +467,7 @@ export default async function AdminTournamentPage({ params }: PageProps) {
                   {phase.matches.map((match) => (
                     <li key={match.id}>
                       <Link className="underline" href={`/matches/${match.id}`}>{match.id}</Link> / 第{match.roundNumber ?? "-"}試合 / {matchStatusLabel[match.status]} / 使用ステージ {match.stageName ?? "未設定"} / {match.players.length}人
+                      {match.spectatorCameraEnabled ? " / 観戦カメラあり" : ""}
                     </li>
                   ))}
                 </ul>
